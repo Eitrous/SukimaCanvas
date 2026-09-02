@@ -47,6 +47,60 @@ export const WEBROOT = parseStringEnv("WBO_WEBROOT", DEFAULT_WEBROOT);
 /** Whether the Hosted Event Service shell is enabled for this deployment. */
 export const HOSTED_MODE = parseBooleanEnv("WBO_HOSTED_MODE", false);
 
+/** Directory where Hosted Event Service business state (accounts, sessions, verification tokens) is stored. */
+export const HOSTED_DATA_DIR = parseStringEnv(
+  "WBO_HOSTED_DATA_DIR",
+  path.join(APP_ROOT, "hosted-data"),
+);
+
+/** Directory where outgoing Hosted Event Service mail is queued as JSON files until a mail vendor is selected. */
+export const HOSTED_MAIL_OUTBOX_DIR = parseStringEnv(
+  "WBO_HOSTED_MAIL_OUTBOX_DIR",
+  undefined,
+);
+
+/** Maximum age of a hosted account session, measured from its creation. */
+export const HOSTED_SESSION_MAX_AGE_MS = parseIntegerEnv(
+  "WBO_HOSTED_SESSION_MAX_AGE_MS",
+  30 * 24 * 60 * 60 * 1000,
+);
+
+/** Idle timeout after which a hosted account session requires a new login. */
+export const HOSTED_SESSION_IDLE_TIMEOUT_MS = parseIntegerEnv(
+  "WBO_HOSTED_SESSION_IDLE_TIMEOUT_MS",
+  12 * 60 * 60 * 1000,
+);
+
+/** How long a hosted account email verification link stays valid. */
+export const HOSTED_VERIFICATION_TOKEN_TTL_MS = parseIntegerEnv(
+  "WBO_HOSTED_VERIFICATION_TOKEN_TTL_MS",
+  24 * 60 * 60 * 1000,
+);
+
+/** Maximum registration submissions per client IP or email within the register window. */
+export const HOSTED_REGISTER_ATTEMPTS_LIMIT = parseIntegerEnv(
+  "WBO_HOSTED_REGISTER_ATTEMPTS_LIMIT",
+  20,
+);
+
+/** Window for hosted registration attempt limits. */
+export const HOSTED_REGISTER_ATTEMPTS_WINDOW_MS = parseIntegerEnv(
+  "WBO_HOSTED_REGISTER_ATTEMPTS_WINDOW_MS",
+  15 * 60 * 1000,
+);
+
+/** Maximum login submissions per client IP or email within the login window. */
+export const HOSTED_LOGIN_ATTEMPTS_LIMIT = parseIntegerEnv(
+  "WBO_HOSTED_LOGIN_ATTEMPTS_LIMIT",
+  10,
+);
+
+/** Window for hosted login attempt limits. */
+export const HOSTED_LOGIN_ATTEMPTS_WINDOW_MS = parseIntegerEnv(
+  "WBO_HOSTED_LOGIN_ATTEMPTS_WINDOW_MS",
+  15 * 60 * 1000,
+);
+
 /** Immutable version identifier shown by the Corresponding Source page. */
 export const DEPLOYMENT_VERSION = parseStringEnv(
   "WBO_DEPLOYMENT_VERSION",

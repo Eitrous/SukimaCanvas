@@ -13,10 +13,16 @@ import observability from "../observability/index.mjs";
 const { logger } = observability;
 const RUNTIME_DIR = path.dirname(fileURLToPath(import.meta.url));
 const BUNDLED_WEBROOT = path.resolve(RUNTIME_DIR, "../../client-data");
-const HOSTED_ASSET_PATHS = new Set([
-  "/hosted.css",
+// Hosted-only assets exist outside legacy WBO; raw hosted page templates are
+// rendered exclusively through their routes in every mode.
+const HOSTED_ASSET_PATHS = new Set(["/hosted.css"]);
+const HOSTED_TEMPLATE_PATHS = new Set([
   "/hosted.html",
   "/source.html",
+  "/register.html",
+  "/login.html",
+  "/verify.html",
+  "/logout.html",
 ]);
 
 /** @import { HttpResponse, ServerConfig, ServerRuntime } from "../../types/server-runtime.d.ts" */
@@ -66,9 +72,20 @@ function configuredTemplatePathWithBundledFallback(config, fileName) {
  * @returns {import("../../types/server-runtime.d.ts").StaticFileServer}
  */
 function createStaticFileServer(config) {
-  const configuredFileserver = createSingleRootStaticFileServer(
-    config,
-    config.WEBROOT,
+  /**
+   * @param {import("../../types/server-runtime.d.ts").StaticFileServer} fileserver
+   * @returns {import("../../types/server-runtime.d.ts").StaticFileServer}
+   */
+  const skipHostedTemplates = (fileserver) => (request, response, next) => {
+    if (HOSTED_TEMPLATE_PATHS.has(parseRequestUrl(request.url).pathname)) {
+      next();
+      return;
+    }
+    fileserver(request, response, next);
+  };
+
+  const configuredFileserver = skipHostedTemplates(
+    createSingleRootStaticFileServer(config, config.WEBROOT),
   );
   const configuredRoot = path.resolve(config.WEBROOT);
   const bundledRootIsConfigured = configuredRoot === BUNDLED_WEBROOT;
@@ -88,9 +105,8 @@ function createStaticFileServer(config) {
     };
   }
 
-  const bundledFileserver = createSingleRootStaticFileServer(
-    config,
-    BUNDLED_WEBROOT,
+  const bundledFileserver = skipHostedTemplates(
+    createSingleRootStaticFileServer(config, BUNDLED_WEBROOT),
   );
   return (request, response, next) => {
     const isHostedAsset =
@@ -171,6 +187,22 @@ function createServerRuntime(config) {
     sourceTemplatePath: configuredTemplatePathWithBundledFallback(
       config,
       "source.html",
+    ),
+    registerTemplatePath: configuredTemplatePathWithBundledFallback(
+      config,
+      "register.html",
+    ),
+    loginTemplatePath: configuredTemplatePathWithBundledFallback(
+      config,
+      "login.html",
+    ),
+    verifyTemplatePath: configuredTemplatePathWithBundledFallback(
+      config,
+      "verify.html",
+    ),
+    logoutTemplatePath: configuredTemplatePathWithBundledFallback(
+      config,
+      "logout.html",
     ),
     htmlHeadSnippet,
   });

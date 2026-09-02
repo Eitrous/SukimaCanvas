@@ -1,0 +1,32 @@
+import { serveError } from "../http/observation.mjs";
+
+/** @import { HttpRouteContext, HostedEventModule } from "../../types/server-runtime.d.ts" */
+
+/**
+ * Hosted account pages exist only in hosted mode. Legacy WBO has no account
+ * concept, so each route rejects with a deterministic 404 instead of falling
+ * through to static file resolution.
+ *
+ * @param {keyof Pick<HostedEventModule, "serveRegister" | "serveLogin" | "serveVerify" | "serveLogout">} handlerName
+ * @returns {import("../../types/server-runtime.d.ts").HttpRouteHandler}
+ */
+function serveHostedAccountPage(handlerName) {
+  return (ctx) => {
+    const hostedEventModule = ctx.runtime.hostedEventModule;
+    if (!hostedEventModule.enabled) {
+      serveError(
+        ctx.request,
+        ctx.response,
+        ctx.runtime.errorPage,
+        ctx.observed,
+      )();
+      return;
+    }
+    return hostedEventModule[handlerName](ctx);
+  };
+}
+
+export const serveRegister = serveHostedAccountPage("serveRegister");
+export const serveLogin = serveHostedAccountPage("serveLogin");
+export const serveVerify = serveHostedAccountPage("serveVerify");
+export const serveLogout = serveHostedAccountPage("serveLogout");

@@ -206,6 +206,14 @@ function requestRouteTemplate(route) {
       return "/random";
     case "source":
       return "/source";
+    case "hosted_register":
+      return "/register";
+    case "hosted_login":
+      return "/login";
+    case "hosted_verify":
+      return "/verify";
+    case "hosted_logout":
+      return "/logout";
     case "index":
       return "/";
     default:

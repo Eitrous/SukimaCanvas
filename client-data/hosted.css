@@ -211,6 +211,140 @@ h1 {
   line-height: 1.6;
 }
 
+.hosted-account-main {
+  padding-top: clamp(48px, 9vh, 96px);
+}
+
+.hosted-account-card {
+  max-width: 440px;
+  padding: 28px 26px;
+  border: 1px solid var(--hosted-border);
+  border-radius: 4px;
+  background: var(--hosted-surface);
+}
+
+.hosted-account-card h1 {
+  margin: 0 0 10px;
+  font-size: 26px;
+  letter-spacing: -0.02em;
+}
+
+.hosted-account-intro {
+  margin: 0 0 20px;
+  color: var(--hosted-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.hosted-account-note {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.hosted-account-actions {
+  margin: 18px 0 0;
+}
+
+.hosted-account-alt {
+  margin: 18px 0 0;
+  color: var(--hosted-muted);
+  font-size: 12px;
+}
+
+.hosted-account-alt a {
+  color: inherit;
+}
+
+.hosted-form-field {
+  margin: 0 0 16px;
+}
+
+.hosted-form-field label {
+  display: block;
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+
+.hosted-form-field input[type="email"],
+.hosted-form-field input[type="password"] {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--hosted-border);
+  border-radius: 2px;
+  background: var(--hosted-surface);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+}
+
+.hosted-form-field input[type="email"]:focus,
+.hosted-form-field input[type="password"]:focus {
+  outline: none;
+  border-color: var(--hosted-border-strong);
+}
+
+.hosted-form-hint {
+  margin: 6px 0 0;
+  color: var(--hosted-muted);
+  font-size: 11px;
+}
+
+.hosted-form-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.hosted-form-checkbox label {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.hosted-form-error {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--hosted-border-strong);
+  border-left: 4px solid var(--hosted-border-strong);
+  background: #f6f7f9;
+  color: var(--hosted-text);
+  font-size: 13px;
+}
+
+.hosted-form-success {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--hosted-border);
+  border-left: 4px solid var(--hosted-accent);
+  background: var(--hosted-surface);
+  color: var(--hosted-text);
+  font-size: 13px;
+}
+
+.hosted-submit {
+  padding: 10px 16px;
+  border: 1px solid var(--hosted-border-strong);
+  border-radius: 2px;
+  background: var(--hosted-surface);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.hosted-submit:hover,
+.hosted-submit:focus {
+  border-color: var(--hosted-text);
+}
+
+.hosted-account-email {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .hosted-footer {
   border-top: 1px solid var(--hosted-border);
 }

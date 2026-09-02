@@ -1,4 +1,12 @@
 import { localizedHref, Template } from "../http/templating.mjs";
+import { createHostedCaptcha } from "./accounts/captcha.mjs";
+import { createOutboxMailDelivery } from "./accounts/mail.mjs";
+import { createRateLimiter } from "./accounts/rate_limits.mjs";
+import {
+  createHostedAccountRoutes,
+  resolveSignedInAccountFromRequest,
+} from "./accounts/routes.mjs";
+import { createFileAccountStore } from "./accounts/store.mjs";
 
 /** @import { HttpRequest, HttpResponse, ServerConfig } from "../../types/server-runtime.d.ts" */
 
@@ -22,7 +30,7 @@ class HostedPageTemplate extends Template {
   /**
    * @param {string} templatePath
    * @param {ServerConfig} serverConfig
-   * @param {{htmlHeadSnippet?: string}} [options]
+   * @param {{htmlHeadSnippet?: string, resolveAccount?: (request: HttpRequest) => {accountId: string, email: string} | null}} [options]
    */
   constructor(templatePath, serverConfig, options) {
     super(templatePath, serverConfig, {
@@ -30,6 +38,7 @@ class HostedPageTemplate extends Template {
       supportedLanguages: HOSTED_LANGUAGES,
       languageMatching: "strict",
     });
+    this.resolveAccount = options?.resolveAccount;
   }
 
   /**
@@ -56,7 +65,19 @@ class HostedPageTemplate extends Template {
       href: localizedHref(pageUrl, language),
     }));
     params.hostedCanonicalUrl = localizedHref(pageUrl, params.language);
+    // Hosted pages render account state, so they must never be cached by
+    // shared caches or stored by browsers.
+    params.varyCookie = true;
+    const account = this.resolveAccount ? this.resolveAccount(request) : null;
+    params.hostedAccount = account ? { email: account.email } : null;
     return params;
+  }
+
+  /**
+   * @returns {string}
+   */
+  cacheControl() {
+    return "no-store";
   }
 
   /**
@@ -67,25 +88,83 @@ class HostedPageTemplate extends Template {
    * @returns {{encoding: import("../http/compression.mjs").CompressionEncoding | undefined}}
    */
   serveWithStatus(request, response, statusCode, extraParams) {
+    // Verification links carry single-use tokens in the URL; hosted pages
+    // must never propagate their URLs onward through Referer.
+    response.setHeader("Referrer-Policy", "no-referrer");
     return this.serveStatus(request, response, statusCode, false, extraParams);
   }
 }
 
 /**
  * @param {ServerConfig} config
- * @param {{homeTemplatePath: string, sourceTemplatePath: string, htmlHeadSnippet?: string}} paths
+ * @param {{
+ *   homeTemplatePath: string,
+ *   sourceTemplatePath: string,
+ *   registerTemplatePath: string,
+ *   loginTemplatePath: string,
+ *   verifyTemplatePath: string,
+ *   logoutTemplatePath: string,
+ *   htmlHeadSnippet?: string,
+ * }} paths
  * @returns {import("../../types/server-runtime.d.ts").HostedEventModule}
  */
 function createHostedEventModule(config, paths) {
-  const homeTemplate = new HostedPageTemplate(paths.homeTemplatePath, config, {
-    htmlHeadSnippet: paths.htmlHeadSnippet,
+  const store = createFileAccountStore({
+    dataDir: config.HOSTED_DATA_DIR,
+    sessionMaxAgeMs: config.HOSTED_SESSION_MAX_AGE_MS,
+    sessionIdleMs: config.HOSTED_SESSION_IDLE_TIMEOUT_MS,
+    verificationTokenTtlMs: config.HOSTED_VERIFICATION_TOKEN_TTL_MS,
   });
+  // Every hosted page renders the session-aware header, including home and
+  // source, so all hosted templates share the account resolver.
+  /** @type {(request: HttpRequest) => {accountId: string, email: string} | null} */
+  const resolveAccount = (request) =>
+    resolveSignedInAccountFromRequest(store, request);
+  const templateOptions = {
+    htmlHeadSnippet: paths.htmlHeadSnippet,
+    resolveAccount,
+  };
+  const homeTemplate = new HostedPageTemplate(
+    paths.homeTemplatePath,
+    config,
+    templateOptions,
+  );
   const sourceTemplate = new HostedPageTemplate(
     paths.sourceTemplatePath,
     config,
-    { htmlHeadSnippet: paths.htmlHeadSnippet },
+    templateOptions,
   );
   const sourceMapping = resolveSourceMapping(config);
+
+  const accountRoutes = createHostedAccountRoutes({
+    config,
+    store,
+    mail: createOutboxMailDelivery(config),
+    captcha: createHostedCaptcha(config),
+    limiter: createRateLimiter(),
+    templates: {
+      register: new HostedPageTemplate(
+        paths.registerTemplatePath,
+        config,
+        templateOptions,
+      ),
+      login: new HostedPageTemplate(
+        paths.loginTemplatePath,
+        config,
+        templateOptions,
+      ),
+      verify: new HostedPageTemplate(
+        paths.verifyTemplatePath,
+        config,
+        templateOptions,
+      ),
+      logout: new HostedPageTemplate(
+        paths.logoutTemplatePath,
+        config,
+        templateOptions,
+      ),
+    },
+  });
 
   return {
     enabled: config.HOSTED_MODE === true,
@@ -105,6 +184,7 @@ function createHostedEventModule(config, paths) {
           : {}),
       });
     },
+    ...accountRoutes,
   };
 }
 

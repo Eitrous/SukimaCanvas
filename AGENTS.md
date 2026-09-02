@@ -66,6 +66,24 @@ future Hosted Event behavior has one composition seam.
 source disclosure inputs; they are intentionally not inferred from a mutable
 branch or the local working tree.
 
+In hosted mode, accounts live under
+[hosted_event/accounts/](./server/hosted_event/accounts/): `store.mjs` owns the
+durable account/session/verification-token state (verification tokens and
+session ids are persisted only as SHA-256 digests), `passwords.mjs` owns scrypt
+hashing, `emails.mjs` owns normalization and validation, `routes.mjs` owns the
+`/register`, `/verify`, `/login`, and `/logout` flows, and `captcha.mjs` exposes
+the configurable CAPTCHA contract backed by the shared `TURNSTILE_*`
+configuration. Raw hosted page templates are never served statically; their
+routes own them, and legacy mode 404s all account routes. Verification mail is
+queued as JSON files in `WBO_HOSTED_MAIL_OUTBOX_DIR` (default
+`<WBO_HOSTED_DATA_DIR>/mail-outbox`) until a mail vendor is selected. Account
+responses, logs, and emails must never carry passwords, password hashes, or
+verification tokens; hosted pages are session-aware and therefore `no-store`.
+Hosted account limits and timeouts are configured with `WBO_HOSTED_DATA_DIR`,
+`WBO_HOSTED_SESSION_MAX_AGE_MS`, `WBO_HOSTED_SESSION_IDLE_TIMEOUT_MS`,
+`WBO_HOSTED_VERIFICATION_TOKEN_TTL_MS`, and the
+`WBO_HOSTED_REGISTER_ATTEMPTS_*` / `WBO_HOSTED_LOGIN_ATTEMPTS_*` pairs.
+
 Every HTTP request passes through [dispatch.mjs](./server/http/dispatch.mjs),
 where URL validation, route matching, route-level access checks, request
 observation, and error responses are wired together. Supporting HTTP behavior is

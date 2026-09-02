@@ -136,6 +136,7 @@ export async function startTestServer(
     ...process.env,
     PORT: "0",
     WBO_HISTORY_DIR: dataPath,
+    WBO_HOSTED_DATA_DIR: path.join(dataPath, "hosted-data"),
     WBO_SAVE_INTERVAL: "100",
     WBO_MAX_SAVE_DELAY: "100",
     WBO_MAX_EMIT_COUNT: "*:100000/60s",

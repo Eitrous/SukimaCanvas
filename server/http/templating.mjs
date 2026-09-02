@@ -178,9 +178,12 @@ function pickStrictLanguage(supportedLanguages, acceptedLanguages) {
  * @returns {string}
  */
 function findBaseUrl(req) {
+  // The socket can already be detached when rendering an error page for an
+  // aborted request, so treat it as optional.
+  const socket = req.socket;
   const proto =
     firstHeaderValue(req.headers["x-forwarded-proto"]) ||
-    ("encrypted" in req.socket && req.socket.encrypted ? "https" : "http");
+    (socket && "encrypted" in socket && socket.encrypted ? "https" : "http");
   const host =
     firstHeaderValue(req.headers["x-forwarded-host"]) ||
     firstHeaderValue(req.headers.host) ||
@@ -453,6 +456,23 @@ class Template extends StaticTemplate {
   renderForRequest(request, extraParams) {
     const parsedUrl = parseRequestUrl(request.url);
     return this.render(this.parameters(parsedUrl, request, false, extraParams));
+  }
+
+  /**
+   * Resolves the negotiated language and its dictionary for a request without
+   * rendering, so server-side flows (form errors, email copy) reuse the same
+   * localization rules as templates.
+   *
+   * @param {TemplateRequest} request
+   * @param {URL} parsedUrl
+   * @returns {{language: string, translations: TranslationDictionary}}
+   */
+  translationsFor(request, parsedUrl) {
+    const parameters = this.parameters(parsedUrl, request, false, {});
+    return {
+      language: parameters.language,
+      translations: parameters.translations,
+    };
   }
 
   /**

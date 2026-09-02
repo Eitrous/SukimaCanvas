@@ -2,10 +2,9 @@
 <html lang="{{hostedLanguage}}" dir="{{hostedDirection}}">
   <head>
     <meta charset="utf-8" />
-    <title>{{hostedTranslations.hosted_service_name}}</title>
+    <title>{{hostedTranslations.hosted_verify_title}}</title>
     <base href="{{baseHref}}" />
     <link rel="stylesheet" href="hosted.css" />
-    <meta name="description" content="{{hostedTranslations.hosted_service_tagline}}" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="icon" type="image/x-icon" sizes="16x16" href="favicon.ico" />
     <link rel="apple-touch-icon" href="favicon.svg" />
@@ -38,14 +37,15 @@
       </nav>
     </header>
 
-    <main class="hosted-main">
-      <section class="hosted-hero" aria-labelledby="hosted-home-title">
-        <p class="hosted-eyebrow">{{hostedTranslations.hosted_service_tagline}}</p>
-        <h1 id="hosted-home-title">{{hostedTranslations.hosted_home_title}}</h1>
-        <p class="hosted-intro">{{hostedTranslations.hosted_home_intro}}</p>
-      </section>
-      <section class="hosted-status" aria-live="polite">
-        <p>{{hostedTranslations.hosted_home_status}}</p>
+    <main class="hosted-main hosted-account-main">
+      <section class="hosted-account-card" aria-labelledby="hosted-verify-title">
+        <h1 id="hosted-verify-title">{{hostedTranslations.hosted_verify_title}}</h1>
+        {{#if hostedVerifyInvalid}}
+        <p class="hosted-form-error" role="alert">{{hostedVerifyInvalid}}</p>
+        {{/if}}
+        <p class="hosted-account-alt">
+          <a href="login">{{hostedTranslations.hosted_nav_login}}</a>
+        </p>
       </section>
     </main>
 
