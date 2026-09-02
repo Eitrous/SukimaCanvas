@@ -100,6 +100,36 @@ export function parseDisabledFlagEnv(name, env = process.env) {
 }
 
 /**
+ * @param {string} name
+ * @param {boolean} defaultValue
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {boolean}
+ */
+export function parseBooleanEnv(name, defaultValue, env = process.env) {
+  const value = env[name];
+  if (value === undefined || value.trim() === "") return defaultValue;
+
+  switch (value.trim().toLowerCase()) {
+    case "1":
+    case "true":
+    case "yes":
+    case "on":
+    case "enabled":
+      return true;
+    case "0":
+    case "false":
+    case "no":
+    case "off":
+    case "disabled":
+      return false;
+    default:
+      throw new Error(
+        `Invalid ${name}: ${value}. Expected a boolean value such as true or false.`,
+      );
+  }
+}
+
+/**
  * @param {string} text
  * @returns {number}
  */

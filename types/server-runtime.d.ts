@@ -25,6 +25,13 @@ export type ServerRuntime = {
   indexTemplate: import("../server/http/templating.mjs").Template;
   rulesTemplate: import("../server/http/templating.mjs").RulesTemplate;
   manifestTemplate: import("../server/http/templating.mjs").Template;
+  hostedEventModule: HostedEventModule;
+};
+
+export type HostedEventModule = {
+  enabled: boolean;
+  serveHome: HttpRouteHandler;
+  serveSource: HttpRouteHandler;
 };
 
 export type ObservedHttpRequest = {
@@ -59,7 +66,11 @@ export type HttpRequestHandler = (context: {
 }) => void;
 
 export type SocketServerModule = {
-  start: (app: import("http").Server, config: ServerConfig) => Promise<unknown>;
+  start: (
+    app: import("http").Server,
+    config: ServerConfig,
+    runtime: ServerRuntime,
+  ) => Promise<unknown>;
   shutdown?: () => Promise<void>;
 };
 
@@ -103,6 +114,7 @@ export type SocketBoardPermissionContext = {
 export type AppSocket = import("socket.io").Socket & {
   boardName?: string;
   boardPermissionContext?: SocketBoardPermissionContext;
+  hostedEventModule?: HostedEventModule;
   replayBootstrap?: unknown;
   turnstileValidatedUntil?: number;
   client: { request: SocketRequest };

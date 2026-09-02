@@ -17,6 +17,20 @@ agents changing the repository.
 - Use `npm run typecheck` for the unified JS typecheck.
 - Use `npm run bench` before and after changes, only for suspected hot-path, persistence, replay, or broadcast-throughput changes.
 
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked as local Markdown files under `.scratch/<feature-slug>/`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Triage uses the default canonical labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repo using root `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.
+
 ## source of truth
 
 Read this section as the normal flow of a board page and a board write. Use
@@ -39,6 +53,18 @@ Runtime logging, metrics, and tracing start from
 in [logging.mjs](./server/observability/logging.mjs) and metric utilities in
 [metric_helpers.mjs](./server/observability/metric_helpers.mjs).
 `WBO_BASE_PATH` public path handling lives with request URL parsing.
+
+The Hosted Event Service shell is composed into the same runtime by
+[hosted_event/module.mjs](./server/hosted_event/module.mjs). `WBO_HOSTED_MODE`
+switches the root page to the Hosted shell while preserving legacy WBO mode;
+`/source` renders the version-pinned Corresponding Source disclosure and
+returns an explicit unavailable response when deployment mapping is missing.
+Boot passes this runtime to both the HTTP handler and Socket.IO startup so
+future Hosted Event behavior has one composition seam.
+`WBO_DEPLOYMENT_VERSION`, `WBO_CORRESPONDING_SOURCE_URL` (a URL template with a
+`{version}` placeholder), and `WBO_CORRESPONDING_SOURCE_BUILD` are startup-only
+source disclosure inputs; they are intentionally not inferred from a mutable
+branch or the local working tree.
 
 Every HTTP request passes through [dispatch.mjs](./server/http/dispatch.mjs),
 where URL validation, route matching, route-level access checks, request

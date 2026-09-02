@@ -87,7 +87,7 @@ async function startWhiteboardServer(config, options) {
 
   app.on("clientError", handleClientError);
   await check_output_directory(config.HISTORY_DIR);
-  await options.sockets.start(app, config);
+  await options.sockets.start(app, config, runtime);
   if (options.installShutdownHandlers === true) {
     installShutdownHandlers(app, options.sockets);
   }

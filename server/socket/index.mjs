@@ -66,7 +66,7 @@ import { handleTurnstileTokenMessage } from "./turnstile.mjs";
 const { Server } = socketIO;
 const { logger, metrics, tracing } = observability;
 
-/** @import { AppSocket, MessageData, NormalizedMessageData, ReportUserPayload, ServerConfig, SetTemporaryModeratorPayload, TurnstileAckCallback } from "../../types/server-runtime.d.ts" */
+/** @import { AppSocket, MessageData, NormalizedMessageData, ReportUserPayload, ServerConfig, ServerRuntime, SetTemporaryModeratorPayload, TurnstileAckCallback } from "../../types/server-runtime.d.ts" */
 /** @typedef {{type: number, fromSeq: number, seq: number, _children: NormalizedMessageData[]}} ConnectionReplayBatch */
 /** @typedef {{ok: true, boardName: string, board: BoardData, baselineSeq: number, latestSeq: number, minReplayableSeq: number, replayBatch: ConnectionReplayBatch, outcome: "empty" | "replayed"} | {ok: false, reason: string, boardName?: string, baselineSeq?: number, latestSeq?: number, minReplayableSeq?: number, error?: unknown}} ConnectionReplayBootstrap */
 /** @type {Map<string, AppSocket>} */
@@ -384,15 +384,20 @@ function resolveClientIp(socket, boardName, config) {
 /**
  * @param {any} app
  * @param {ServerConfig} config
+ * @param {ServerRuntime} runtime
  * @returns {Promise<import("socket.io").Server>}
  */
-async function startIO(app, config) {
+async function startIO(app, config, runtime) {
   io = new Server(app, { path: "/socket.io" });
   io.use(
     (
       /** @type {AppSocket} */ socket,
       /** @type {(error?: Error) => void} */ next,
     ) => {
+      // Keep the same cold runtime object available to the real Socket.IO
+      // lifecycle as the HTTP routes receive. Hosted capabilities can extend
+      // this seam without creating a second configuration or template graph.
+      socket.hostedEventModule = runtime.hostedEventModule;
       prepareConnectionReplay(
         socket,
         config,

@@ -22,7 +22,9 @@ import { parseRequestUrl } from "./request_url.mjs";
 /** @typedef {NonNullable<typeof TOOLBAR_TOOLS[number]>} ToolbarTool */
 /** @typedef {import("./client_configuration.mjs").ClientConfiguration} ClientConfig */
 /** @typedef {"zstd" | "br" | "gzip"} CompressionEncoding */
-/** @typedef {{htmlHeadSnippet?: string}} TemplateOptions */
+/**
+ * @typedef {{htmlHeadSnippet?: string, supportedLanguages?: string[], languageMatching?: "loose" | "strict"}} TemplateOptions
+ */
 /** @import { ServerConfig } from "../../types/server-runtime.d.ts" */
 
 const HTTP_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -150,6 +152,28 @@ function pickLanguage(supportedLanguages, acceptedLanguages) {
 }
 
 /**
+ * Match the small language set used by an independently branded shell. Exact
+ * locale families are handled explicitly so an unsupported regional variant
+ * (for example `zh-TW`) does not silently select `zh-CN`.
+ *
+ * @param {string[]} supportedLanguages
+ * @param {{tag: string, quality: number}[]} acceptedLanguages
+ * @returns {string | undefined}
+ */
+function pickStrictLanguage(supportedLanguages, acceptedLanguages) {
+  for (const accepted of acceptedLanguages) {
+    if (accepted.tag === "*") return supportedLanguages[0];
+    if (supportedLanguages.includes(accepted.tag)) return accepted.tag;
+    const base = localeBase(accepted.tag);
+    if (base === "en" && supportedLanguages.includes("en")) return "en";
+    if (accepted.tag === "zh" && supportedLanguages.includes("zh-CN")) {
+      return "zh-CN";
+    }
+  }
+  return undefined;
+}
+
+/**
  * @param {TemplateRequest} req
  * @returns {string}
  */
@@ -182,12 +206,21 @@ function findPathPrefix(pathname) {
 /**
  * @param {string} baseUrl
  * @param {string} language
+ * @returns {string}
+ */
+function localizedHref(baseUrl, language) {
+  const url = new URL(baseUrl);
+  url.searchParams.set("lang", language);
+  return url.href;
+}
+
+/**
+ * @param {string} baseUrl
+ * @param {string} language
  * @returns {handlebars.SafeString}
  */
 function localizedUrl(baseUrl, language) {
-  const url = new URL(baseUrl);
-  url.searchParams.set("lang", language);
-  return new handlebars.SafeString(url.href);
+  return new handlebars.SafeString(localizedHref(baseUrl, language));
 }
 
 /**
@@ -224,7 +257,7 @@ function htmlVaryHeaders(parsedUrl, parameters) {
 }
 
 const startHtmlResponse =
-  /** @type {(response: TemplateResponse, request: TemplateRequest, parsedUrl: URL, parameters: TemplateParameters, cacheControlValue: string, contentLength?: number) => { stream: import("stream").Writable, encoding: import("./compression.mjs").CompressionEncoding | undefined }} */
+  /** @type {(response: TemplateResponse, request: TemplateRequest, parsedUrl: URL, parameters: TemplateParameters, cacheControlValue: string, contentLength?: number, statusCode?: number) => { stream: import("stream").Writable, encoding: import("./compression.mjs").CompressionEncoding | undefined }} */
   (
     response,
     request,
@@ -232,16 +265,24 @@ const startHtmlResponse =
     parameters,
     cacheControlValue,
     contentLength,
+    statusCode = 200,
   ) =>
-    startCompressedResponse(response, request.headers["accept-encoding"], {
-      ...(contentLength === undefined
-        ? {}
-        : { "Content-Length": contentLength }),
-      "Content-Type": "text/html",
-      "Cache-Control": cacheControlValue,
-      ...(typeof parameters.etag === "string" ? { ETag: parameters.etag } : {}),
-      ...htmlVaryHeaders(parsedUrl, parameters),
-    });
+    startCompressedResponse(
+      response,
+      request.headers["accept-encoding"],
+      {
+        ...(contentLength === undefined
+          ? {}
+          : { "Content-Length": contentLength }),
+        "Content-Type": "text/html",
+        "Cache-Control": cacheControlValue,
+        ...(typeof parameters.etag === "string"
+          ? { ETag: parameters.etag }
+          : {}),
+        ...htmlVaryHeaders(parsedUrl, parameters),
+      },
+      statusCode,
+    );
 
 class StaticTemplate {
   /** @type {string} */
@@ -283,6 +324,12 @@ class Template extends StaticTemplate {
   /** @type {ClientConfig} */
   clientConfig;
 
+  /** @type {string[]} */
+  supportedLanguages;
+
+  /** @type {"loose" | "strict"} */
+  languageMatching;
+
   /**
    * @param {string} templatePath
    * @param {ServerConfig} serverConfig
@@ -292,6 +339,8 @@ class Template extends StaticTemplate {
     super(templatePath, options);
     this.serverConfig = serverConfig;
     this.clientConfig = createClientConfiguration(serverConfig);
+    this.supportedLanguages = options?.supportedLanguages || languages;
+    this.languageMatching = options?.languageMatching || "loose";
   }
 
   /**
@@ -307,14 +356,22 @@ class Template extends StaticTemplate {
       firstHeaderValue(request.headers["accept-language"]) ||
       "";
     const accept_languages = parseAcceptLanguage(accept_language_str);
-    let language = pickLanguage(languages, accept_languages) || "en";
+    const selectedLanguage =
+      this.languageMatching === "strict"
+        ? pickStrictLanguage(this.supportedLanguages, accept_languages)
+        : pickLanguage(this.supportedLanguages, accept_languages);
+    let language =
+      selectedLanguage ||
+      (this.supportedLanguages.includes("en")
+        ? "en"
+        : this.supportedLanguages[0] || "en");
     // The loose matcher returns the first language that partially matches, so we need to
     // check if the preferred language is supported to return it
     if (accept_languages.length > 0) {
       const preferred = accept_languages[0];
       if (preferred) {
         const preferred_language = preferred.tag;
-        if (languages.includes(preferred_language)) {
+        if (this.supportedLanguages.includes(preferred_language)) {
           language = preferred_language;
         }
       }
@@ -325,20 +382,23 @@ class Template extends StaticTemplate {
       findPathPrefix(parsedUrl.pathname) ||
       this.serverConfig.BASE_PATH.slice(1);
     const baseUrl = findBaseUrl(request) + (prefix ? `/${prefix}/` : "");
+    const baseHref = new URL(".", baseUrl).href;
     const moderator = isModerator;
     return {
       baseUrl,
-      baseHref: new URL(".", baseUrl).href,
-      languages,
-      languageLinks: localizedLinks(languages, (linkLanguage) =>
+      baseHref,
+      languages: this.supportedLanguages,
+      languageLinks: localizedLinks(this.supportedLanguages, (linkLanguage) =>
         localizedUrl(baseUrl, linkLanguage),
       ),
       language,
       direction: language === "ar" ? "rtl" : "ltr",
       canonicalUrl: localizedUrl(baseUrl, language),
+      hostedSourceHref: new URL("source", baseHref).href,
       translations,
       configuration,
       moderator,
+      hostedMode: this.serverConfig.HOSTED_MODE === true,
       htmlHeadSnippet: this.htmlHeadSnippet,
       ...extraParams,
     };
@@ -352,6 +412,18 @@ class Template extends StaticTemplate {
    * @returns {{encoding: CompressionEncoding | undefined}}
    */
   serve(request, response, isModerator, extraParams) {
+    return this.serveStatus(request, response, 200, isModerator, extraParams);
+  }
+
+  /**
+   * @param {TemplateRequest} request
+   * @param {TemplateResponse} response
+   * @param {number} statusCode
+   * @param {boolean} [isModerator]
+   * @param {object} [extraParams]
+   * @returns {{encoding: CompressionEncoding | undefined}}
+   */
+  serveStatus(request, response, statusCode, isModerator, extraParams) {
     const parsedUrl = parseRequestUrl(request.url);
     const parameters = this.parameters(
       parsedUrl,
@@ -365,8 +437,9 @@ class Template extends StaticTemplate {
       request,
       parsedUrl,
       parameters,
-      this.cacheControl(),
+      statusCode >= 500 ? "no-store" : this.cacheControl(),
       Buffer.byteLength(body),
+      statusCode,
     );
     stream.end(body);
     return { encoding };
@@ -567,4 +640,10 @@ class RulesTemplate extends Template {
   }
 }
 
-export { BoardTemplate, RulesTemplate, StaticTemplate, Template };
+export {
+  BoardTemplate,
+  RulesTemplate,
+  StaticTemplate,
+  Template,
+  localizedHref,
+};

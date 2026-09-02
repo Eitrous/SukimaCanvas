@@ -1,0 +1,239 @@
+:root {
+  --hosted-background: #fcfcfd;
+  --hosted-surface: #ffffff;
+  --hosted-border: #d9dde3;
+  --hosted-border-strong: #b8c0cc;
+  --hosted-accent: #abc6c6;
+  --hosted-text: #17212b;
+  --hosted-muted: #5f6b78;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background: var(--hosted-background);
+  color: var(--hosted-text);
+  font-family:
+    Liberation Sans,
+    sans-serif;
+  font-size: 16px;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  margin: 0;
+}
+
+a {
+  color: inherit;
+}
+
+.hosted-header,
+.hosted-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px clamp(20px, 5vw, 72px);
+}
+
+.hosted-header {
+  border-bottom: 1px solid var(--hosted-border);
+}
+
+.hosted-header nav,
+.hosted-footer {
+  color: var(--hosted-muted);
+  font-size: 13px;
+}
+
+.hosted-header nav {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.hosted-brand {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-decoration: none;
+}
+
+.hosted-language-picker {
+  position: relative;
+}
+
+.hosted-language-picker summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.hosted-language-picker summary::-webkit-details-marker {
+  display: none;
+}
+
+.hosted-language-picker ul {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 2;
+  min-width: 110px;
+  margin: 0;
+  padding: 4px 0;
+  border: 1px solid var(--hosted-border);
+  background: var(--hosted-surface);
+  list-style: none;
+  box-shadow: 0 4px 12px rgb(23 33 43 / 10%);
+}
+
+.hosted-language-picker li a {
+  display: block;
+  padding: 6px 10px;
+  text-decoration: none;
+}
+
+.hosted-language-picker li a:hover,
+.hosted-language-picker li a:focus {
+  background: #f2f7f5;
+}
+
+.hosted-main {
+  width: min(920px, calc(100% - 40px));
+  margin: 0 auto;
+  flex: 1;
+  padding: clamp(72px, 13vh, 150px) 0;
+}
+
+.hosted-hero {
+  max-width: 680px;
+}
+
+.hosted-eyebrow {
+  margin: 0 0 18px;
+  color: var(--hosted-muted);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+h1 {
+  max-width: 650px;
+  margin: 0;
+  font-size: clamp(36px, 7vw, 72px);
+  font-weight: 400;
+  letter-spacing: -0.04em;
+  line-height: 1.05;
+}
+
+.hosted-intro {
+  max-width: 600px;
+  margin: 26px 0 0;
+  color: var(--hosted-muted);
+  font-size: 18px;
+  line-height: 1.6;
+}
+
+.hosted-status {
+  max-width: 600px;
+  margin-top: 56px;
+  padding: 18px 20px;
+  border: 1px solid var(--hosted-border);
+  border-left: 4px solid var(--hosted-accent);
+  background: var(--hosted-surface);
+  color: var(--hosted-muted);
+  font-size: 13px;
+}
+
+.hosted-status p {
+  margin: 0;
+}
+
+.hosted-source-main {
+  padding-top: clamp(56px, 10vh, 110px);
+}
+
+.hosted-source-details {
+  max-width: 600px;
+  margin: 36px 0 30px;
+  padding: 16px 20px;
+  border: 1px solid var(--hosted-border);
+  background: var(--hosted-surface);
+}
+
+.hosted-source-details div {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.hosted-source-details dt {
+  color: var(--hosted-muted);
+  font-size: 13px;
+}
+
+.hosted-source-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+}
+
+.hosted-source-details .hosted-build-instructions {
+  max-width: 62%;
+  font-family: inherit;
+  line-height: 1.5;
+  text-align: right;
+}
+
+.hosted-primary-link {
+  display: inline-block;
+  padding: 11px 15px;
+  border: 1px solid var(--hosted-border-strong);
+  background: var(--hosted-surface);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.hosted-primary-link:hover,
+.hosted-primary-link:focus {
+  border-color: var(--hosted-text);
+}
+
+.hosted-source-error {
+  max-width: 600px;
+  color: var(--hosted-muted);
+  line-height: 1.6;
+}
+
+.hosted-footer {
+  border-top: 1px solid var(--hosted-border);
+}
+
+.hosted-footer a {
+  text-underline-offset: 3px;
+}
+
+@media (max-width: 560px) {
+  .hosted-header,
+  .hosted-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .hosted-header nav {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .hosted-source-details div {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+}

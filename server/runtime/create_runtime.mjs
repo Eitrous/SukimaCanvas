@@ -4,13 +4,20 @@ import { fileURLToPath } from "node:url";
 
 import serveStatic from "serve-static";
 
+import { createHostedEventModule } from "../hosted_event/module.mjs";
 import { CSP, staticFileCacheControl } from "../http/cache_policy.mjs";
+import { parseRequestUrl } from "../http/request_url.mjs";
 import * as templating from "../http/templating.mjs";
 import observability from "../observability/index.mjs";
 
 const { logger } = observability;
 const RUNTIME_DIR = path.dirname(fileURLToPath(import.meta.url));
 const BUNDLED_WEBROOT = path.resolve(RUNTIME_DIR, "../../client-data");
+const HOSTED_ASSET_PATHS = new Set([
+  "/hosted.css",
+  "/hosted.html",
+  "/source.html",
+]);
 
 /** @import { HttpResponse, ServerConfig, ServerRuntime } from "../../types/server-runtime.d.ts" */
 
@@ -64,17 +71,39 @@ function createStaticFileServer(config) {
     config.WEBROOT,
   );
   const configuredRoot = path.resolve(config.WEBROOT);
-  if (configuredRoot === BUNDLED_WEBROOT) return configuredFileserver;
+  const bundledRootIsConfigured = configuredRoot === BUNDLED_WEBROOT;
+  if (bundledRootIsConfigured && config.HOSTED_MODE === true) {
+    return configuredFileserver;
+  }
+  if (bundledRootIsConfigured) {
+    return (request, response, next) => {
+      const isHostedAsset = HOSTED_ASSET_PATHS.has(
+        parseRequestUrl(request.url).pathname,
+      );
+      if (isHostedAsset) {
+        next();
+        return;
+      }
+      configuredFileserver(request, response, next);
+    };
+  }
 
   const bundledFileserver = createSingleRootStaticFileServer(
     config,
     BUNDLED_WEBROOT,
   );
   return (request, response, next) => {
+    const isHostedAsset =
+      config.HOSTED_MODE !== true &&
+      HOSTED_ASSET_PATHS.has(parseRequestUrl(request.url).pathname);
     const originalUrl = request.url;
     configuredFileserver(request, response, (error) => {
       if (error !== undefined) {
         next(error);
+        return;
+      }
+      if (isHostedAsset) {
+        next();
         return;
       }
       request.url = originalUrl;
@@ -134,6 +163,17 @@ function createServerRuntime(config) {
     config,
     { htmlHeadSnippet },
   );
+  const hostedEventModule = createHostedEventModule(config, {
+    homeTemplatePath: configuredTemplatePathWithBundledFallback(
+      config,
+      "hosted.html",
+    ),
+    sourceTemplatePath: configuredTemplatePathWithBundledFallback(
+      config,
+      "source.html",
+    ),
+    htmlHeadSnippet,
+  });
   return {
     config,
     fileserver,
@@ -142,6 +182,7 @@ function createServerRuntime(config) {
     indexTemplate,
     rulesTemplate,
     manifestTemplate,
+    hostedEventModule,
   };
 }
 

@@ -4,6 +4,7 @@ import {
   parseBasePathEnv,
   parseBoardModeratorsEnv,
   parseCommaSeparatedEnv,
+  parseBooleanEnv,
   parseDisabledFlagEnv,
   parseEnumEnv,
   parseIntegerEnv,
@@ -42,6 +43,27 @@ export const LOG_LEVEL = parseEnumEnv("LOG_LEVEL", LOG_LEVELS, "info");
 
 /** Static web root used to serve the client application files. */
 export const WEBROOT = parseStringEnv("WBO_WEBROOT", DEFAULT_WEBROOT);
+
+/** Whether the Hosted Event Service shell is enabled for this deployment. */
+export const HOSTED_MODE = parseBooleanEnv("WBO_HOSTED_MODE", false);
+
+/** Immutable version identifier shown by the Corresponding Source page. */
+export const DEPLOYMENT_VERSION = parseStringEnv(
+  "WBO_DEPLOYMENT_VERSION",
+  undefined,
+);
+
+/** URL template for the Corresponding Source; it must contain `{version}`. */
+export const CORRESPONDING_SOURCE_URL = parseStringEnv(
+  "WBO_CORRESPONDING_SOURCE_URL",
+  undefined,
+);
+
+/** Build instructions paired with the Corresponding Source mapping. */
+export const CORRESPONDING_SOURCE_BUILD = parseStringEnv(
+  "WBO_CORRESPONDING_SOURCE_BUILD",
+  undefined,
+);
 
 /** External URL path prefix used when WBO is mounted behind a reverse proxy. */
 export const BASE_PATH = parseBasePathEnv("WBO_BASE_PATH");

@@ -81,6 +81,17 @@ If you want to make the server accessible with a different path like `https://yo
 Set `WBO_BASE_PATH=/wbo` so generated links, redirects, and canonical URLs point at the external subfolder.
 See instructions on our Wiki about [how to setup a reverse proxy for WBO](https://github.com/lovasoa/whitebophir/wiki/Setup-behind-Reverse-Proxies).
 
+### Hosted Event Service shell
+
+The Hosted Event Service shell can be enabled with `WBO_HOSTED_MODE=true`. In
+this mode the root page presents the SukimaCanvas hosted-service shell while
+the existing WBO board routes remain available during the incremental rollout.
+The `/source` page identifies the exact deployment source when
+`WBO_DEPLOYMENT_VERSION`, a `{version}` URL template in
+`WBO_CORRESPONDING_SOURCE_URL`, and `WBO_CORRESPONDING_SOURCE_BUILD` are all
+configured; without that verifiable mapping it returns a clear unavailable
+response.
+
 ## Translations
 
 WBO is available in multiple languages. The translations are stored in [`server/http/translations.json`](./server/http/translations.json).
@@ -180,6 +191,10 @@ Some important environment variables are :
 - `WBO_HISTORY_DIR` : configures the directory where the boards are saved. Defaults to `./server-data/`.
 - `WBO_BASE_PATH` : optional external URL path prefix, such as `/wbo`, for deployments mounted under a reverse-proxy subfolder.
 - `WBO_HTML_HEAD_SNIPPET_PATH` : optional path to an HTML snippet inserted raw before `</head>` on rendered HTML pages. This is useful for adding user analytics scripts or similar trusted snippets. The file is read once at server startup; relative paths resolve from the server working directory.
+- `WBO_HOSTED_MODE` : enables the Hosted Event Service shell when set to a truthy boolean value. It defaults to `false`.
+- `WBO_DEPLOYMENT_VERSION` : immutable deployment identifier shown on the Corresponding Source page.
+- `WBO_CORRESPONDING_SOURCE_URL` : absolute HTTP(S) URL template for the corresponding source. It must contain the literal `{version}` placeholder, which is replaced with the encoded `WBO_DEPLOYMENT_VERSION` at startup; rolling version labels such as `main` or `latest` are rejected.
+- `WBO_CORRESPONDING_SOURCE_BUILD` : plain-text build instructions shown with the corresponding source mapping. The mapping is unavailable until this is configured.
 - `WBO_MAX_EMIT_COUNT` : the general per-IP socket write limit profile. Use compact entries such as `*:250/5s anonymous:125/5s`. Increase this if you want smoother drawings, at the expense of making denial-of-service bursts cheaper for clients. The default is `*:250/5s`.
 - `WBO_MAX_CONSTRUCTIVE_ACTIONS_PER_IP` : the constructive per-IP write limit profile. Use compact entries such as `*:40/10s anonymous:20/10s`.
 - `WBO_MAX_DESTRUCTIVE_ACTIONS_PER_IP` : the destructive per-IP write limit profile. Use compact entries such as `*:190/60s anonymous:95/60s`.

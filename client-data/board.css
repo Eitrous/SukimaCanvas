@@ -1112,6 +1112,13 @@ select {
   gap: var(--board-control-gap);
 }
 
+.board-source-link {
+  color: #5f6b78;
+  font-size: 11px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 #settings {
   /* Trailing inset below the style block; hidden in read-only (no box, no margin). */
   margin-bottom: 20px;

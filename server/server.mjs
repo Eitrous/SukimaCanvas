@@ -12,11 +12,12 @@ import {
 } from "./routes/board_assets.mjs";
 import { redirectBoardQuery, serveBoardPage } from "./routes/board_page.mjs";
 import {
-  redirectToDefaultBoard,
   redirectToRandomBoard,
   serveBoardStaticAsset,
   serveManifest,
   serveRulesPage,
+  serveRoot,
+  serveSource,
   serveStaticAsset,
 } from "./routes/static.mjs";
 import { startWhiteboardServer } from "./runtime/boot.mjs";
@@ -53,10 +54,9 @@ function createWhiteboardHttpHandler() {
       access: "user",
     }),
     route("/rules", serveRulesPage, "rules"),
+    route("/source", serveSource, "source"),
     route("/manifest.json", serveManifest, "manifest"),
-    route("/", redirectToDefaultBoard, "index", {
-      access: "user",
-    }),
+    route("/", serveRoot, "index"),
     route("*", serveStaticAsset, "static_file"),
   ]);
 }
