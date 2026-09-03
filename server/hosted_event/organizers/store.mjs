@@ -9,6 +9,17 @@ const { logger } = observability;
 const STORE_FORMAT_VERSION = 1;
 const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
+/**
+ * An unguessable, non-enumerable Event Public ID for public service URLs. 16
+ * base64url characters (96 bits of entropy) — internal reservation and board
+ * session identifiers never appear in public URLs.
+ *
+ * @returns {string}
+ */
+function randomPublicEventId() {
+  return crypto.randomBytes(12).toString("base64url");
+}
+
 /** Application field bounds; the route validates first, the store clamps defensively. */
 const MAX_ORGANIZER_NAME_LENGTH = 120;
 const MAX_CONTACT_NAME_LENGTH = 120;
@@ -71,6 +82,55 @@ const MAX_OPERATOR_NOTE_LENGTH = 2000;
  * }} StoredInvitation
  */
 /**
+ * @typedef {"draft" | "submitted" | "approved" | "rejected" | "cancelled"} ReservationStatus
+ */
+/**
+ * @typedef {{
+ *   reservationId: string,
+ *   organizerId: string,
+ *   eventName: string,
+ *   description: string,
+ *   visibility: "public" | "unlisted",
+ *   startsAtMs: number,
+ *   endsAtMs: number,
+ *   requestedSeats: number,
+ *   status: ReservationStatus,
+ *   createdByAccountId: string,
+ *   createdAtMs: number,
+ *   submittedAtMs: number | null,
+ *   decidedAtMs: number | null,
+ *   decidedByAccountId: string | null,
+ *   operatorNote: string | null,
+ *   eventId: string | null,
+ * }} StoredReservation
+ */
+/**
+ * @typedef {{
+ *   eventId: string,
+ *   publicId: string,
+ *   reservationId: string,
+ *   organizerId: string,
+ *   name: string,
+ *   visibility: "public" | "unlisted",
+ *   startsAtMs: number,
+ *   endsAtMs: number,
+ *   createdAtMs: number,
+ * }} StoredEvent
+ */
+/**
+ * @typedef {{
+ *   boardSessionId: string,
+ *   eventId: string,
+ *   reservationId: string,
+ *   organizerId: string,
+ *   status: "scheduled",
+ *   seats: number,
+ *   windowStartMs: number,
+ *   windowEndMs: number,
+ *   createdAtMs: number,
+ * }} StoredBoardSession
+ */
+/**
  * @typedef {{
  *   recordId: string,
  *   createdAtMs: number,
@@ -82,6 +142,45 @@ const MAX_OPERATOR_NOTE_LENGTH = 2000;
  *   organizerId: string | null,
  * }} StoredAuditRecord
  */
+
+/**
+ * Computes the peak concurrent Board Session count and Participant Seat total
+ * within a candidate capacity window, including the candidate itself. The
+ * active count only rises at an allocation's start, so evaluating every start
+ * point inside the window (plus the window's own start) finds both peaks.
+ *
+ * @param {number} windowStartMs
+ * @param {number} windowEndMs
+ * @param {number} seats
+ * @param {{windowStartMs: number, windowEndMs: number, seats: number}[]} allocations
+ * @returns {{maxSessions: number, maxSeats: number}}
+ */
+function computeCapacityPeak(windowStartMs, windowEndMs, seats, allocations) {
+  const overlapping = allocations.filter(
+    (a) => a.windowStartMs < windowEndMs && windowStartMs < a.windowEndMs,
+  );
+  const points = [windowStartMs];
+  for (const a of overlapping) {
+    if (a.windowStartMs >= windowStartMs && a.windowStartMs < windowEndMs) {
+      points.push(a.windowStartMs);
+    }
+  }
+  let maxSessions = 0;
+  let maxSeats = 0;
+  for (const t of points) {
+    let sessions = 1;
+    let total = seats;
+    for (const a of overlapping) {
+      if (a.windowStartMs <= t && t < a.windowEndMs) {
+        sessions += 1;
+        total += a.seats;
+      }
+    }
+    if (sessions > maxSessions) maxSessions = sessions;
+    if (total > maxSeats) maxSeats = total;
+  }
+  return { maxSessions, maxSeats };
+}
 
 /**
  * Durable storage for Organizer Applications, Organizers, their role grants,
@@ -122,6 +221,14 @@ function createFileOrganizerStore(options) {
   const rolesByKey = new Map();
   /** @type {Map<string, StoredInvitation>} */
   const invitationsById = new Map();
+  /** @type {Map<string, StoredReservation>} */
+  const reservationsById = new Map();
+  /** @type {Map<string, StoredEvent>} */
+  const eventsById = new Map();
+  /** @type {Map<string, string>} */
+  const eventIdsByPublicId = new Map();
+  /** @type {Map<string, StoredBoardSession>} */
+  const boardSessionsById = new Map();
   /** @type {StoredAuditRecord[]} */
   const auditRecords = [];
   let loaded = false;
@@ -131,6 +238,9 @@ function createFileOrganizerStore(options) {
   const ORGANIZERS_FILE = path.join(dataDir, "organizers.json");
   const ROLES_FILE = path.join(dataDir, "organizer_roles.json");
   const INVITATIONS_FILE = path.join(dataDir, "organizer_invitations.json");
+  const RESERVATIONS_FILE = path.join(dataDir, "reservations.json");
+  const EVENTS_FILE = path.join(dataDir, "events.json");
+  const BOARD_SESSIONS_FILE = path.join(dataDir, "board_sessions.json");
   const AUDIT_FILE = path.join(dataDir, "change_audit.json");
 
   /**
@@ -178,6 +288,25 @@ function createFileOrganizerStore(options) {
       invitations.invitations || []
     )) {
       invitationsById.set(invitation.invitationId, invitation);
+    }
+    const reservations = readStoreFile(RESERVATIONS_FILE, { reservations: [] });
+    for (const reservation of /** @type {StoredReservation[]} */ (
+      reservations.reservations || []
+    )) {
+      reservationsById.set(reservation.reservationId, reservation);
+    }
+    const events = readStoreFile(EVENTS_FILE, { events: [] });
+    for (const event of /** @type {StoredEvent[]} */ (events.events || [])) {
+      eventsById.set(event.eventId, event);
+      eventIdsByPublicId.set(event.publicId, event.eventId);
+    }
+    const boardSessions = readStoreFile(BOARD_SESSIONS_FILE, {
+      boardSessions: [],
+    });
+    for (const boardSession of /** @type {StoredBoardSession[]} */ (
+      boardSessions.boardSessions || []
+    )) {
+      boardSessionsById.set(boardSession.boardSessionId, boardSession);
     }
     const audit = readStoreFile(AUDIT_FILE, { records: [] });
     for (const record of /** @type {StoredAuditRecord[]} */ (
@@ -258,6 +387,18 @@ function createFileOrganizerStore(options) {
     await writeStoreFile(INVITATIONS_FILE, {
       version: STORE_FORMAT_VERSION,
       invitations: [...invitationsById.values()],
+    });
+    await writeStoreFile(RESERVATIONS_FILE, {
+      version: STORE_FORMAT_VERSION,
+      reservations: [...reservationsById.values()],
+    });
+    await writeStoreFile(EVENTS_FILE, {
+      version: STORE_FORMAT_VERSION,
+      events: [...eventsById.values()],
+    });
+    await writeStoreFile(BOARD_SESSIONS_FILE, {
+      version: STORE_FORMAT_VERSION,
+      boardSessions: [...boardSessionsById.values()],
     });
     await writeStoreFile(AUDIT_FILE, {
       version: STORE_FORMAT_VERSION,
@@ -964,6 +1105,397 @@ function createFileOrganizerStore(options) {
       .sort((left, right) => left.createdAtMs - right.createdAtMs);
   }
 
+  // --- reservations, events, board sessions & capacity ---------------------
+
+  /**
+   * @param {number} value
+   * @param {number} fallback
+   * @returns {number}
+   */
+  function integerOr(value, fallback) {
+    return Number.isInteger(value) ? value : fallback;
+  }
+
+  /**
+   * Creates a DRAFT reservation. Field legality (time ordering, seat range) is
+   * validated by the route for per-field feedback; the store clamps strings and
+   * coerces numbers defensively.
+   *
+   * @param {{
+   *   organizerId: string,
+   *   createdByAccountId: string,
+   *   eventName: string,
+   *   description?: string,
+   *   visibility: "public" | "unlisted",
+   *   startsAtMs: number,
+   *   endsAtMs: number,
+   *   requestedSeats: number,
+   * }} input
+   * @returns {Promise<{ok: true, reservation: StoredReservation}>}
+   */
+  async function createReservation(input) {
+    ensureLoaded();
+    /** @type {StoredReservation} */
+    const reservation = {
+      reservationId: randomId(),
+      organizerId: String(input.organizerId || ""),
+      eventName: clampString(input.eventName, MAX_ORGANIZER_NAME_LENGTH),
+      description: clampString(input.description || "", MAX_DESCRIPTION_LENGTH),
+      visibility: input.visibility === "public" ? "public" : "unlisted",
+      startsAtMs: integerOr(input.startsAtMs, 0),
+      endsAtMs: integerOr(input.endsAtMs, 0),
+      requestedSeats: integerOr(input.requestedSeats, 0),
+      status: "draft",
+      createdByAccountId: String(input.createdByAccountId || ""),
+      createdAtMs: clock(),
+      submittedAtMs: null,
+      decidedAtMs: null,
+      decidedByAccountId: null,
+      operatorNote: null,
+      eventId: null,
+    };
+    reservationsById.set(reservation.reservationId, reservation);
+    recordAudit({
+      actorAccountId: reservation.createdByAccountId,
+      actorKind: "account",
+      action: "reservation.created",
+      subjectType: "reservation",
+      subjectId: reservation.reservationId,
+      organizerId: reservation.organizerId,
+    });
+    await enqueueWrite(persistNow);
+    return { ok: true, reservation };
+  }
+
+  /**
+   * Overwrites the editable fields of a DRAFT reservation. Submitted or decided
+   * reservations reject direct edits (they change only through a Change
+   * Request).
+   *
+   * @param {{
+   *   reservationId: string,
+   *   eventName: string,
+   *   description?: string,
+   *   visibility: "public" | "unlisted",
+   *   startsAtMs: number,
+   *   endsAtMs: number,
+   *   requestedSeats: number,
+   * }} input
+   * @returns {Promise<{ok: true} | {ok: false, reason: "not_found" | "not_draft"}>}
+   */
+  async function updateReservation(input) {
+    ensureLoaded();
+    const reservation = reservationsById.get(String(input.reservationId || ""));
+    if (!reservation) return { ok: false, reason: "not_found" };
+    if (reservation.status !== "draft") {
+      return { ok: false, reason: "not_draft" };
+    }
+    reservation.eventName = clampString(
+      input.eventName,
+      MAX_ORGANIZER_NAME_LENGTH,
+    );
+    reservation.description = clampString(
+      input.description || "",
+      MAX_DESCRIPTION_LENGTH,
+    );
+    reservation.visibility =
+      input.visibility === "public" ? "public" : "unlisted";
+    reservation.startsAtMs = integerOr(input.startsAtMs, 0);
+    reservation.endsAtMs = integerOr(input.endsAtMs, 0);
+    reservation.requestedSeats = integerOr(input.requestedSeats, 0);
+    await enqueueWrite(persistNow);
+    return { ok: true };
+  }
+
+  /**
+   * Transitions a DRAFT to SUBMITTED. Only a legal draft with a future start
+   * may submit; after submission the approval-affecting fields are frozen.
+   *
+   * @param {{reservationId: string, actorAccountId: string, now: number}} input
+   * @returns {Promise<{ok: true} | {ok: false, reason: "not_found" | "not_draft" | "past_start"}>}
+   */
+  async function submitReservation(input) {
+    ensureLoaded();
+    const reservation = reservationsById.get(String(input.reservationId || ""));
+    if (!reservation) return { ok: false, reason: "not_found" };
+    if (reservation.status !== "draft") {
+      return { ok: false, reason: "not_draft" };
+    }
+    if (reservation.startsAtMs <= input.now) {
+      return { ok: false, reason: "past_start" };
+    }
+    reservation.status = "submitted";
+    reservation.submittedAtMs = clock();
+    recordAudit({
+      actorAccountId: String(input.actorAccountId || ""),
+      actorKind: "account",
+      action: "reservation.submitted",
+      subjectType: "reservation",
+      subjectId: reservation.reservationId,
+      organizerId: reservation.organizerId,
+    });
+    await enqueueWrite(persistNow);
+    return { ok: true };
+  }
+
+  /**
+   * Cancels a DRAFT or SUBMITTED reservation (a withdrawal). Approved
+   * reservations are cancelled through the change/cancel workstream, not here.
+   *
+   * @param {{reservationId: string, actorAccountId: string}} input
+   * @returns {Promise<{ok: true} | {ok: false, reason: "not_found" | "not_cancellable"}>}
+   */
+  async function cancelReservation(input) {
+    ensureLoaded();
+    const reservation = reservationsById.get(String(input.reservationId || ""));
+    if (!reservation) return { ok: false, reason: "not_found" };
+    if (reservation.status !== "draft" && reservation.status !== "submitted") {
+      return { ok: false, reason: "not_cancellable" };
+    }
+    reservation.status = "cancelled";
+    recordAudit({
+      actorAccountId: String(input.actorAccountId || ""),
+      actorKind: "account",
+      action: "reservation.cancelled",
+      subjectType: "reservation",
+      subjectId: reservation.reservationId,
+      organizerId: reservation.organizerId,
+    });
+    await enqueueWrite(persistNow);
+    return { ok: true };
+  }
+
+  /**
+   * The capacity window of a reservation: the buffer before its start to the
+   * buffer after its end.
+   *
+   * @param {StoredReservation} reservation
+   * @param {number} bufferMs
+   * @returns {{windowStartMs: number, windowEndMs: number}}
+   */
+  function reservationWindow(reservation, bufferMs) {
+    return {
+      windowStartMs: reservation.startsAtMs - bufferMs,
+      windowEndMs: reservation.endsAtMs + bufferMs,
+    };
+  }
+
+  /**
+   * Live Capacity Allocations: the windows and seats held by every Board
+   * Session (each backs one approved reservation).
+   *
+   * @returns {{windowStartMs: number, windowEndMs: number, seats: number}[]}
+   */
+  function activeAllocations() {
+    return [...boardSessionsById.values()].map((session) => ({
+      windowStartMs: session.windowStartMs,
+      windowEndMs: session.windowEndMs,
+      seats: session.seats,
+    }));
+  }
+
+  /**
+   * Peak Capacity Allocation impact if a submitted reservation were approved
+   * now, for the operator console. Includes the reservation itself.
+   *
+   * @param {{reservationId: string, bufferMs: number, sessionLimit: number, seatLimit: number}} input
+   * @returns {{maxSessions: number, maxSeats: number, sessionLimit: number, seatLimit: number, wouldExceed: boolean} | null}
+   */
+  function capacityImpact(input) {
+    ensureLoaded();
+    const reservation = reservationsById.get(String(input.reservationId || ""));
+    if (!reservation) return null;
+    const window = reservationWindow(reservation, input.bufferMs);
+    const peak = computeCapacityPeak(
+      window.windowStartMs,
+      window.windowEndMs,
+      reservation.requestedSeats,
+      activeAllocations(),
+    );
+    return {
+      maxSessions: peak.maxSessions,
+      maxSeats: peak.maxSeats,
+      sessionLimit: input.sessionLimit,
+      seatLimit: input.seatLimit,
+      wouldExceed:
+        peak.maxSessions > input.sessionLimit ||
+        peak.maxSeats > input.seatLimit,
+    };
+  }
+
+  /**
+   * Approves a SUBMITTED reservation: checks Capacity Allocation against the
+   * concurrent limits and, if it fits, atomically mints an unguessable Event
+   * Public ID, creates the Event and its scheduled Board Session, and marks the
+   * reservation approved. The check-and-commit is synchronous, so concurrent
+   * approvals can never oversell or partially approve.
+   *
+   * @param {{reservationId: string, operatorAccountId: string, now: number, bufferMs: number, sessionLimit: number, seatLimit: number}} input
+   * @returns {Promise<{ok: true, publicId: string, eventId: string} | {ok: false, reason: "not_found" | "not_submitted" | "past_start" | "capacity", maxSessions?: number, maxSeats?: number}>}
+   */
+  async function approveReservation(input) {
+    ensureLoaded();
+    const reservation = reservationsById.get(String(input.reservationId || ""));
+    if (!reservation) return { ok: false, reason: "not_found" };
+    if (reservation.status !== "submitted") {
+      return { ok: false, reason: "not_submitted" };
+    }
+    // A reservation whose start has passed since submission cannot be approved
+    // into the past.
+    if (reservation.startsAtMs <= input.now) {
+      return { ok: false, reason: "past_start" };
+    }
+    const window = reservationWindow(reservation, input.bufferMs);
+    const peak = computeCapacityPeak(
+      window.windowStartMs,
+      window.windowEndMs,
+      reservation.requestedSeats,
+      activeAllocations(),
+    );
+    if (
+      peak.maxSessions > input.sessionLimit ||
+      peak.maxSeats > input.seatLimit
+    ) {
+      return {
+        ok: false,
+        reason: "capacity",
+        maxSessions: peak.maxSessions,
+        maxSeats: peak.maxSeats,
+      };
+    }
+    const now = clock();
+    const eventId = randomId();
+    let publicId = randomPublicEventId();
+    while (eventIdsByPublicId.has(publicId)) publicId = randomPublicEventId();
+    const boardSessionId = randomId();
+    eventsById.set(eventId, {
+      eventId,
+      publicId,
+      reservationId: reservation.reservationId,
+      organizerId: reservation.organizerId,
+      name: reservation.eventName,
+      visibility: reservation.visibility,
+      startsAtMs: reservation.startsAtMs,
+      endsAtMs: reservation.endsAtMs,
+      createdAtMs: now,
+    });
+    eventIdsByPublicId.set(publicId, eventId);
+    boardSessionsById.set(boardSessionId, {
+      boardSessionId,
+      eventId,
+      reservationId: reservation.reservationId,
+      organizerId: reservation.organizerId,
+      status: "scheduled",
+      seats: reservation.requestedSeats,
+      windowStartMs: window.windowStartMs,
+      windowEndMs: window.windowEndMs,
+      createdAtMs: now,
+    });
+    reservation.status = "approved";
+    reservation.decidedAtMs = now;
+    reservation.decidedByAccountId = String(input.operatorAccountId || "");
+    reservation.eventId = eventId;
+    recordAudit({
+      actorAccountId: String(input.operatorAccountId || ""),
+      actorKind: "operator",
+      action: "reservation.approved",
+      subjectType: "reservation",
+      subjectId: reservation.reservationId,
+      organizerId: reservation.organizerId,
+    });
+    await enqueueWrite(persistNow);
+    return { ok: true, publicId, eventId };
+  }
+
+  /**
+   * Rejects a SUBMITTED reservation with an operator-only note.
+   *
+   * @param {{reservationId: string, operatorAccountId: string, note?: string}} input
+   * @returns {Promise<{ok: true} | {ok: false, reason: "not_found" | "not_submitted"}>}
+   */
+  async function rejectReservation(input) {
+    ensureLoaded();
+    const reservation = reservationsById.get(String(input.reservationId || ""));
+    if (!reservation) return { ok: false, reason: "not_found" };
+    if (reservation.status !== "submitted") {
+      return { ok: false, reason: "not_submitted" };
+    }
+    reservation.status = "rejected";
+    reservation.decidedAtMs = clock();
+    reservation.decidedByAccountId = String(input.operatorAccountId || "");
+    reservation.operatorNote = clampString(
+      input.note || "",
+      MAX_OPERATOR_NOTE_LENGTH,
+    );
+    recordAudit({
+      actorAccountId: String(input.operatorAccountId || ""),
+      actorKind: "operator",
+      action: "reservation.rejected",
+      subjectType: "reservation",
+      subjectId: reservation.reservationId,
+      organizerId: reservation.organizerId,
+    });
+    await enqueueWrite(persistNow);
+    return { ok: true };
+  }
+
+  /**
+   * @param {string} reservationId
+   * @returns {StoredReservation | null}
+   */
+  function getReservationById(reservationId) {
+    ensureLoaded();
+    if (typeof reservationId !== "string" || reservationId === "") return null;
+    return reservationsById.get(reservationId) || null;
+  }
+
+  /**
+   * Reservations of an organizer, newest first.
+   *
+   * @param {string} organizerId
+   * @returns {StoredReservation[]}
+   */
+  function listReservationsForOrganizer(organizerId) {
+    ensureLoaded();
+    return [...reservationsById.values()]
+      .filter((reservation) => reservation.organizerId === organizerId)
+      .sort((left, right) => right.createdAtMs - left.createdAtMs);
+  }
+
+  /**
+   * The operator review queue: submitted reservations, oldest first.
+   *
+   * @returns {StoredReservation[]}
+   */
+  function listSubmittedReservations() {
+    ensureLoaded();
+    return [...reservationsById.values()]
+      .filter((reservation) => reservation.status === "submitted")
+      .sort(
+        (left, right) => (left.submittedAtMs || 0) - (right.submittedAtMs || 0),
+      );
+  }
+
+  /**
+   * @param {string} eventId
+   * @returns {StoredEvent | null}
+   */
+  function getEventById(eventId) {
+    ensureLoaded();
+    if (typeof eventId !== "string" || eventId === "") return null;
+    return eventsById.get(eventId) || null;
+  }
+
+  /**
+   * @param {string} publicId
+   * @returns {StoredEvent | null}
+   */
+  function getEventByPublicId(publicId) {
+    ensureLoaded();
+    const eventId = eventIdsByPublicId.get(String(publicId || ""));
+    return eventId ? eventsById.get(eventId) || null : null;
+  }
+
   /**
    * Resolves once every scheduled write has landed on disk.
    *
@@ -998,8 +1530,20 @@ function createFileOrganizerStore(options) {
     declineInvitation,
     revokeInvitation,
     listAuditForOrganizer,
+    createReservation,
+    updateReservation,
+    submitReservation,
+    cancelReservation,
+    approveReservation,
+    rejectReservation,
+    capacityImpact,
+    getReservationById,
+    listReservationsForOrganizer,
+    listSubmittedReservations,
+    getEventById,
+    getEventByPublicId,
     flush,
   };
 }
 
-export { createFileOrganizerStore };
+export { createFileOrganizerStore, computeCapacityPeak };

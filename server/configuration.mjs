@@ -164,6 +164,58 @@ export const HOSTED_ORGANIZER_INVITE_ATTEMPTS_WINDOW_MS = parseIntegerEnv(
   15 * 60 * 1000,
 );
 
+/** Maximum reservation create/submit actions per account or IP within the window. */
+export const HOSTED_RESERVATION_ATTEMPTS_LIMIT = parseIntegerEnv(
+  "WBO_HOSTED_RESERVATION_ATTEMPTS_LIMIT",
+  30,
+);
+
+/** Window for hosted reservation attempt limits. */
+export const HOSTED_RESERVATION_ATTEMPTS_WINDOW_MS = parseIntegerEnv(
+  "WBO_HOSTED_RESERVATION_ATTEMPTS_WINDOW_MS",
+  15 * 60 * 1000,
+);
+
+/** Capacity window buffer added before a reservation's start and after its end. */
+export const HOSTED_CAPACITY_WINDOW_BUFFER_MS = parseIntegerEnv(
+  "WBO_HOSTED_CAPACITY_WINDOW_BUFFER_MS",
+  15 * 60 * 1000,
+);
+
+/** Maximum Board Sessions confirmed across any overlapping capacity window. */
+export const HOSTED_MAX_CONCURRENT_BOARD_SESSIONS = parseIntegerEnv(
+  "WBO_HOSTED_MAX_CONCURRENT_BOARD_SESSIONS",
+  20,
+);
+
+/** Maximum Participant Seats confirmed across any overlapping capacity window. */
+export const HOSTED_MAX_CONCURRENT_SEATS = parseIntegerEnv(
+  "WBO_HOSTED_MAX_CONCURRENT_SEATS",
+  1000,
+);
+
+/** Maximum requested Participant Seats for a single reservation. */
+export const HOSTED_MAX_RESERVATION_SEATS = parseIntegerEnv(
+  "WBO_HOSTED_MAX_RESERVATION_SEATS",
+  50,
+);
+
+/** Maximum planned duration (start to end) of a single reservation. */
+export const HOSTED_MAX_EVENT_DURATION_MS = parseIntegerEnv(
+  "WBO_HOSTED_MAX_EVENT_DURATION_MS",
+  12 * 60 * 60 * 1000,
+);
+
+/**
+ * Fixed service timezone, as an offset from UTC in minutes, used to interpret
+ * and display reservation wall-clock times. The first release operates in
+ * mainland China (UTC+8, no daylight saving), so the default is 480.
+ */
+export const HOSTED_SERVICE_UTC_OFFSET_MINUTES = parseIntegerEnv(
+  "WBO_HOSTED_SERVICE_UTC_OFFSET_MINUTES",
+  480,
+);
+
 /** Immutable version identifier shown by the Corresponding Source page. */
 export const DEPLOYMENT_VERSION = parseStringEnv(
   "WBO_DEPLOYMENT_VERSION",

@@ -2,7 +2,7 @@
 <html lang="{{hostedLanguage}}" dir="{{hostedDirection}}">
   <head>
     <meta charset="utf-8" />
-    <title>{{hostedTranslations.hosted_operator_title}}</title>
+    <title>{{hostedTranslations.hosted_operator_reservations_title}}</title>
     <base href="{{baseHref}}" />
     <link rel="stylesheet" href="hosted.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -43,33 +43,28 @@
     </header>
 
     <main class="hosted-main hosted-account-main">
-      <section class="hosted-account-card" aria-labelledby="hosted-operator-title">
-        <h1 id="hosted-operator-title">{{hostedTranslations.hosted_operator_title}}</h1>
-        {{#if hostedOperatorForbidden}}
-        <p class="hosted-form-error" role="alert">{{hostedOperatorForbidden}}</p>
-        {{else}}
-        <p class="hosted-account-intro">{{hostedTranslations.hosted_operator_intro}}</p>
+      <section class="hosted-account-card" aria-labelledby="hosted-operator-reservations-title">
+        <h1 id="hosted-operator-reservations-title">{{hostedTranslations.hosted_operator_reservations_title}}</h1>
+        <p class="hosted-account-intro">{{hostedTranslations.hosted_operator_reservations_intro}}</p>
         <p class="hosted-account-alt">
-          <a href="operator/reservations">{{hostedTranslations.hosted_operator_reservations_title}}</a>
+          <a href="operator">{{hostedTranslations.hosted_operator_back_to_console}}</a>
         </p>
 
-        <h2 class="hosted-account-section-title">{{hostedTranslations.hosted_operator_queue_title}}</h2>
-        {{#if hostedOperatorHasPending}}
+        {{#if hostedOperatorHasReservations}}
         <ul class="hosted-operator-queue">
-          {{#hostedOperatorPending}}
+          {{#hostedOperatorReservations}}
           <li class="hosted-operator-queue-item">
             <div class="hosted-operator-queue-meta">
-              <span class="hosted-operator-queue-name">{{organizerName}}</span>
-              <span>{{../hostedTranslations.hosted_operator_queue_applicant}}: {{applicantEmail}}</span>
-              <span>{{../hostedTranslations.hosted_operator_queue_submitted}}: {{submittedAt}}</span>
+              <span class="hosted-operator-queue-name">{{eventName}}</span>
+              <span>{{../hostedTranslations.hosted_operator_reservation_organizer}}: {{organizerName}}</span>
+              <span>{{startsAt}} · {{requestedSeats}} {{../hostedTranslations.hosted_reservation_seats_suffix}}</span>
             </div>
-            <a class="hosted-primary-link" href="operator/applications/{{applicationId}}">{{../hostedTranslations.hosted_operator_queue_review}}</a>
+            <a class="hosted-primary-link" href="operator/reservations/{{reservationId}}">{{../hostedTranslations.hosted_operator_queue_review}}</a>
           </li>
-          {{/hostedOperatorPending}}
+          {{/hostedOperatorReservations}}
         </ul>
         {{else}}
-        <p class="hosted-account-note">{{hostedTranslations.hosted_operator_queue_empty}}</p>
-        {{/if}}
+        <p class="hosted-account-note">{{hostedTranslations.hosted_operator_reservations_empty}}</p>
         {{/if}}
       </section>
     </main>

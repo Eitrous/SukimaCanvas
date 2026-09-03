@@ -566,3 +566,19 @@ h1 {
   flex-wrap: wrap;
   gap: 8px;
 }
+
+.hosted-reservation-action {
+  margin-top: 12px;
+}
+
+.hosted-capacity {
+  margin: 16px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--hosted-border);
+  border-radius: 2px;
+  background: var(--hosted-surface);
+}
+
+.hosted-capacity-exceeded {
+  border-color: #c05353;
+}

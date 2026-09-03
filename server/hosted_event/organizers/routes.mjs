@@ -656,9 +656,10 @@ function createOrganizerRoutes(dependencies) {
       });
       return;
     }
-    logger.info(`hosted.organizer_invitation_${decision}ed`, {
-      account_id: account.accountId,
-    });
+    logger.info(
+      `hosted.organizer_invitation_${decision === "accept" ? "accepted" : "declined"}`,
+      { account_id: account.accountId },
+    );
     if (decision === "accept" && "organizerId" in result) {
       seeOther(ctx, publicPath(config, `/organizers/${result.organizerId}`));
       return;

@@ -7,7 +7,7 @@ import { serveError } from "../http/observation.mjs";
  * concept, so each route rejects with a deterministic 404 instead of falling
  * through to static file resolution.
  *
- * @param {keyof Pick<HostedEventModule, "serveRegister" | "serveLogin" | "serveVerify" | "serveLogout" | "serveForgot" | "serveReset" | "serveAccount" | "serveAccountPassword" | "serveAccountSessionRevoke" | "serveAccountSessionsRevokeOthers" | "serveOrganizerApply" | "serveOperatorConsole" | "serveOperatorApplication" | "serveOperatorApproveApplication" | "serveOperatorRejectApplication" | "serveOrganizerConsole" | "serveOrganizerInvitationAccept" | "serveOrganizerInvitationDecline" | "serveOrganizerManage" | "serveOrganizerInvite" | "serveOrganizerInvitationRevoke" | "serveOrganizerMemberRole" | "serveOrganizerMemberRemove">} handlerName
+ * @param {keyof Pick<HostedEventModule, "serveRegister" | "serveLogin" | "serveVerify" | "serveLogout" | "serveForgot" | "serveReset" | "serveAccount" | "serveAccountPassword" | "serveAccountSessionRevoke" | "serveAccountSessionsRevokeOthers" | "serveOrganizerApply" | "serveOperatorConsole" | "serveOperatorApplication" | "serveOperatorApproveApplication" | "serveOperatorRejectApplication" | "serveOrganizerConsole" | "serveOrganizerInvitationAccept" | "serveOrganizerInvitationDecline" | "serveOrganizerManage" | "serveOrganizerInvite" | "serveOrganizerInvitationRevoke" | "serveOrganizerMemberRole" | "serveOrganizerMemberRemove" | "serveOrganizerReservations" | "serveOrganizerReservation" | "serveSubmitReservation" | "serveCancelReservation" | "serveOperatorReservations" | "serveOperatorReservation" | "serveOperatorApproveReservation" | "serveOperatorRejectReservation">} handlerName
  * @returns {import("../../types/server-runtime.d.ts").HttpRouteHandler}
  */
 function serveHostedAccountPage(handlerName) {
@@ -80,4 +80,28 @@ export const serveOrganizerMemberRole = serveHostedAccountPage(
 );
 export const serveOrganizerMemberRemove = serveHostedAccountPage(
   "serveOrganizerMemberRemove",
+);
+export const serveOrganizerReservations = serveHostedAccountPage(
+  "serveOrganizerReservations",
+);
+export const serveOrganizerReservation = serveHostedAccountPage(
+  "serveOrganizerReservation",
+);
+export const serveSubmitReservation = serveHostedAccountPage(
+  "serveSubmitReservation",
+);
+export const serveCancelReservation = serveHostedAccountPage(
+  "serveCancelReservation",
+);
+export const serveOperatorReservations = serveHostedAccountPage(
+  "serveOperatorReservations",
+);
+export const serveOperatorReservation = serveHostedAccountPage(
+  "serveOperatorReservation",
+);
+export const serveOperatorApproveReservation = serveHostedAccountPage(
+  "serveOperatorApproveReservation",
+);
+export const serveOperatorRejectReservation = serveHostedAccountPage(
+  "serveOperatorRejectReservation",
 );

@@ -9,6 +9,7 @@ import {
 import { createFileAccountStore } from "./accounts/store.mjs";
 import { createOrganizerRoutes } from "./organizers/routes.mjs";
 import { createFileOrganizerStore } from "./organizers/store.mjs";
+import { createReservationRoutes } from "./reservations/routes.mjs";
 
 /** @import { HttpRequest, HttpResponse, ServerConfig } from "../../types/server-runtime.d.ts" */
 
@@ -116,6 +117,10 @@ class HostedPageTemplate extends Template {
  *   operatorApplicationTemplatePath: string,
  *   organizerConsoleTemplatePath: string,
  *   organizerManageTemplatePath: string,
+ *   organizerReservationsTemplatePath: string,
+ *   organizerReservationTemplatePath: string,
+ *   operatorReservationsTemplatePath: string,
+ *   operatorReservationTemplatePath: string,
  *   htmlHeadSnippet?: string,
  * }} paths
  * @returns {import("../../types/server-runtime.d.ts").HostedEventModule}
@@ -255,6 +260,37 @@ function createHostedEventModule(config, paths) {
     },
   });
 
+  const reservationRoutes = createReservationRoutes({
+    config,
+    clock,
+    accountStore: store,
+    organizerStore,
+    limiter,
+    operatorEmails,
+    templates: {
+      organizerReservations: new HostedPageTemplate(
+        paths.organizerReservationsTemplatePath,
+        config,
+        templateOptions,
+      ),
+      organizerReservation: new HostedPageTemplate(
+        paths.organizerReservationTemplatePath,
+        config,
+        templateOptions,
+      ),
+      operatorReservations: new HostedPageTemplate(
+        paths.operatorReservationsTemplatePath,
+        config,
+        templateOptions,
+      ),
+      operatorReservation: new HostedPageTemplate(
+        paths.operatorReservationTemplatePath,
+        config,
+        templateOptions,
+      ),
+    },
+  });
+
   return {
     enabled: config.HOSTED_MODE === true,
     serveHome(ctx) {
@@ -275,6 +311,7 @@ function createHostedEventModule(config, paths) {
     },
     ...accountRoutes,
     ...organizerRoutes,
+    ...reservationRoutes,
   };
 }
 

@@ -31,6 +31,10 @@ const HOSTED_TEMPLATE_PATHS = new Set([
   "/operator-application.html",
   "/organizer-console.html",
   "/organizer-manage.html",
+  "/organizer-reservations.html",
+  "/organizer-reservation.html",
+  "/operator-reservations.html",
+  "/operator-reservation.html",
 ]);
 
 /** @import { HttpResponse, ServerConfig, ServerRuntime } from "../../types/server-runtime.d.ts" */
@@ -243,6 +247,23 @@ function createServerRuntime(config) {
     organizerManageTemplatePath: configuredTemplatePathWithBundledFallback(
       config,
       "organizer-manage.html",
+    ),
+    organizerReservationsTemplatePath:
+      configuredTemplatePathWithBundledFallback(
+        config,
+        "organizer-reservations.html",
+      ),
+    organizerReservationTemplatePath: configuredTemplatePathWithBundledFallback(
+      config,
+      "organizer-reservation.html",
+    ),
+    operatorReservationsTemplatePath: configuredTemplatePathWithBundledFallback(
+      config,
+      "operator-reservations.html",
+    ),
+    operatorReservationTemplatePath: configuredTemplatePathWithBundledFallback(
+      config,
+      "operator-reservation.html",
     ),
     htmlHeadSnippet,
   });
