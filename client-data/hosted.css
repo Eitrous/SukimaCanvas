@@ -582,3 +582,96 @@ h1 {
 .hosted-capacity-exceeded {
   border-color: #c05353;
 }
+
+.hosted-events {
+  margin-top: 24px;
+}
+
+.hosted-event-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hosted-event-card {
+  border: 1px solid var(--hosted-border);
+  border-radius: 4px;
+  background: var(--hosted-surface);
+  overflow: hidden;
+}
+
+.hosted-event-card-link {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  color: var(--hosted-text);
+  text-decoration: none;
+}
+
+.hosted-event-card-link:hover,
+.hosted-event-card-link:focus {
+  background: var(--hosted-surface-muted, #f3f4f6);
+}
+
+.hosted-event-card-cover {
+  display: block;
+  width: calc(100% + 28px);
+  height: 120px;
+  margin: -12px -14px 8px;
+  object-fit: cover;
+  background: #f3f4f6;
+}
+
+.hosted-event-card-name {
+  font-weight: 600;
+}
+
+.hosted-event-card-organizer,
+.hosted-event-card-time {
+  color: var(--hosted-muted);
+  font-size: 12px;
+}
+
+.hosted-event-card-tagline {
+  color: var(--hosted-muted);
+  font-size: 12px;
+}
+
+.hosted-event-page {
+  width: 100%;
+  max-width: 640px;
+}
+
+.hosted-event-cover {
+  display: block;
+  width: 100%;
+  max-height: 320px;
+  margin: 0 0 16px;
+  object-fit: cover;
+  border: 1px solid var(--hosted-border);
+  border-radius: 4px;
+  background: #f3f4f6;
+}
+
+.hosted-event-organizer {
+  margin: 4px 0;
+  color: var(--hosted-muted);
+}
+
+.hosted-event-tagline {
+  margin: 8px 0 12px;
+}
+
+.hosted-event-cover-preview {
+  display: block;
+  max-width: 240px;
+  max-height: 160px;
+  margin: 0 0 8px;
+  object-fit: cover;
+  border: 1px solid var(--hosted-border);
+  border-radius: 2px;
+}

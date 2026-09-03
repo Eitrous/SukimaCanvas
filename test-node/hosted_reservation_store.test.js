@@ -7,6 +7,7 @@ const path = require("node:path");
 const {
   createFileOrganizerStore,
   computeCapacityPeak,
+  eventLifecycleState,
 } = require("../server/hosted_event/organizers/store.mjs");
 
 const HOUR = 60 * 60 * 1000;
@@ -531,4 +532,138 @@ test("reservation state survives a store reload", async () => {
     seatLimit: 1000,
   });
   assert.ok(clashResult.ok === false && clashResult.reason === "capacity");
+});
+
+/**
+ * Approves a reservation and returns its minted event.
+ *
+ * @param {ReturnType<typeof createFileOrganizerStore>} store
+ * @param {string} organizerId
+ * @param {number} now
+ * @param {{visibility: "public" | "unlisted", eventName?: string, startsAtMs?: number, endsAtMs?: number}} fields
+ */
+async function approvedEvent(store, organizerId, now, fields) {
+  const created = await store.createReservation({
+    organizerId,
+    createdByAccountId: "owner-1",
+    eventName: fields.eventName || "Event",
+    visibility: fields.visibility,
+    startsAtMs: fields.startsAtMs ?? now + HOUR,
+    endsAtMs: fields.endsAtMs ?? now + 2 * HOUR,
+    requestedSeats: 10,
+  });
+  assert.ok(created.ok);
+  await store.submitReservation({
+    reservationId: created.reservation.reservationId,
+    actorAccountId: "owner-1",
+    now,
+  });
+  const approved = await store.approveReservation({
+    reservationId: created.reservation.reservationId,
+    operatorAccountId: "operator-1",
+    now,
+    bufferMs: BUFFER,
+    sessionLimit: 20,
+    seatLimit: 1000,
+  });
+  assert.ok(approved.ok);
+  const event = store.getEventByPublicId(approved.publicId);
+  assert.ok(event);
+  return event;
+}
+
+test("eventLifecycleState classifies by the service clock", () => {
+  const event = { startsAtMs: 100, endsAtMs: 200 };
+  assert.equal(eventLifecycleState(event, 50), "scheduled");
+  assert.equal(eventLifecycleState(event, 100), "open");
+  assert.equal(eventLifecycleState(event, 150), "open");
+  assert.equal(eventLifecycleState(event, 200), "ended");
+  assert.equal(eventLifecycleState(event, 999), "ended");
+});
+
+test("discovery lists only public, not-yet-ended events", async () => {
+  const now = 1_000_000;
+  const store = makeStore(await createDataDir(), { clock: () => now });
+  const organizerId = await setupOrganizer(store);
+  const publicEvent = await approvedEvent(store, organizerId, now, {
+    visibility: "public",
+    eventName: "Public One",
+    startsAtMs: now + HOUR,
+    endsAtMs: now + 2 * HOUR,
+  });
+  await approvedEvent(store, organizerId, now, {
+    visibility: "unlisted",
+    eventName: "Unlisted One",
+    startsAtMs: now + HOUR,
+    endsAtMs: now + 2 * HOUR,
+  });
+
+  const discoverable = store.listPublicDiscoverableEvents(now);
+  assert.deepEqual(
+    discoverable.map((event) => event.eventId),
+    [publicEvent.eventId],
+  );
+
+  // Once the public event's window has passed, it is no longer discoverable.
+  const afterEnd = store.listPublicDiscoverableEvents(now + 5 * HOUR);
+  assert.deepEqual(afterEnd, []);
+});
+
+test("event display and cover updates are authorized to the owning organizer", async () => {
+  const now = 1_000_000;
+  const dataDir = await createDataDir();
+  const store = makeStore(dataDir, { clock: () => now });
+  const organizerId = await setupOrganizer(store);
+  const event = await approvedEvent(store, organizerId, now, {
+    visibility: "unlisted",
+    eventName: "Togglable",
+  });
+
+  // A different organizer id cannot touch this event.
+  const foreign = await store.updateEventDisplay({
+    organizerId: "some-other-organizer",
+    eventId: event.eventId,
+    visibility: "public",
+    actorAccountId: "owner-1",
+  });
+  assert.deepEqual(foreign, { ok: false, reason: "not_found" });
+
+  const updated = await store.updateEventDisplay({
+    organizerId,
+    eventId: event.eventId,
+    visibility: "public",
+    tagline: "Open now",
+    actorAccountId: "owner-1",
+  });
+  assert.ok(updated.ok);
+  await store.setEventCover({
+    organizerId,
+    eventId: event.eventId,
+    assetId: "asset-xyz",
+    actorAccountId: "owner-1",
+  });
+  await store.flush();
+
+  const reloaded = makeStore(dataDir, { clock: () => now });
+  const persisted = reloaded.getEventForOrganizer(organizerId, event.eventId);
+  assert.ok(persisted);
+  assert.equal(persisted.visibility, "public");
+  assert.equal(persisted.tagline, "Open now");
+  assert.equal(persisted.coverAssetId, "asset-xyz");
+  assert.equal(reloaded.listPublicDiscoverableEvents(now).length, 1);
+
+  // Removing the cover clears only the cover reference.
+  const removed = await reloaded.updateEventDisplay({
+    organizerId,
+    eventId: event.eventId,
+    visibility: "public",
+    tagline: "Open now",
+    removeCover: true,
+    actorAccountId: "owner-1",
+  });
+  assert.ok(removed.ok);
+  assert.equal(
+    reloaded.getEventForOrganizer(organizerId, event.eventId)?.coverAssetId,
+    null,
+  );
 });

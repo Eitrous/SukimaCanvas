@@ -7,6 +7,8 @@ import {
   resolveSignedInAccountFromRequest,
 } from "./accounts/routes.mjs";
 import { createFileAccountStore } from "./accounts/store.mjs";
+import { createFileBrandAssetStore } from "./assets/store.mjs";
+import { createEventRoutes } from "./events/routes.mjs";
 import { createOrganizerRoutes } from "./organizers/routes.mjs";
 import { createFileOrganizerStore } from "./organizers/store.mjs";
 import { createReservationRoutes } from "./reservations/routes.mjs";
@@ -121,6 +123,8 @@ class HostedPageTemplate extends Template {
  *   organizerReservationTemplatePath: string,
  *   operatorReservationsTemplatePath: string,
  *   operatorReservationTemplatePath: string,
+ *   eventTemplatePath: string,
+ *   organizerEventTemplatePath: string,
  *   htmlHeadSnippet?: string,
  * }} paths
  * @returns {import("../../types/server-runtime.d.ts").HostedEventModule}
@@ -141,6 +145,10 @@ function createHostedEventModule(config, paths) {
     passwordResetTtlMs: config.HOSTED_PASSWORD_RESET_TTL_MS,
   });
   const organizerStore = createFileOrganizerStore({
+    dataDir: config.HOSTED_DATA_DIR,
+    clock,
+  });
+  const assetStore = createFileBrandAssetStore({
     dataDir: config.HOSTED_DATA_DIR,
     clock,
   });
@@ -291,11 +299,31 @@ function createHostedEventModule(config, paths) {
     },
   });
 
+  const eventRoutes = createEventRoutes({
+    config,
+    clock,
+    accountStore: store,
+    organizerStore,
+    assetStore,
+    limiter,
+    templates: {
+      home: homeTemplate,
+      event: new HostedPageTemplate(
+        paths.eventTemplatePath,
+        config,
+        templateOptions,
+      ),
+      organizerEvent: new HostedPageTemplate(
+        paths.organizerEventTemplatePath,
+        config,
+        templateOptions,
+      ),
+    },
+  });
+
   return {
     enabled: config.HOSTED_MODE === true,
-    serveHome(ctx) {
-      homeTemplate.serveWithStatus(ctx.request, ctx.response, 200);
-    },
+    serveHome: eventRoutes.serveHome,
     serveSource(ctx) {
       const statusCode = sourceMapping.available ? 200 : 503;
       sourceTemplate.serveWithStatus(ctx.request, ctx.response, statusCode, {
@@ -312,6 +340,10 @@ function createHostedEventModule(config, paths) {
     ...accountRoutes,
     ...organizerRoutes,
     ...reservationRoutes,
+    serveEventPage: eventRoutes.serveEventPage,
+    serveBrandAsset: eventRoutes.serveBrandAsset,
+    serveOrganizerEvent: eventRoutes.serveOrganizerEvent,
+    serveOrganizerEventCover: eventRoutes.serveOrganizerEventCover,
   };
 }
 

@@ -63,6 +63,10 @@ export type HostedEventModule = {
   serveOperatorReservation: HttpRouteHandler;
   serveOperatorApproveReservation: HttpRouteHandler;
   serveOperatorRejectReservation: HttpRouteHandler;
+  serveEventPage: HttpRouteHandler;
+  serveBrandAsset: HttpRouteHandler;
+  serveOrganizerEvent: HttpRouteHandler;
+  serveOrganizerEventCover: HttpRouteHandler;
 };
 
 export type ObservedHttpRequest = {

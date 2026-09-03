@@ -2,17 +2,14 @@
 <html lang="{{hostedLanguage}}" dir="{{hostedDirection}}">
   <head>
     <meta charset="utf-8" />
-    <title>{{hostedTranslations.hosted_service_name}}</title>
+    <title>{{hostedEventName}}</title>
     <base href="{{baseHref}}" />
     <link rel="stylesheet" href="hosted.css" />
-    <meta name="description" content="{{hostedTranslations.hosted_service_tagline}}" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- Unlisted events are reachable only by link and must never be indexed. -->
+    <meta name="robots" content="noindex, nofollow" />
     <link rel="icon" type="image/x-icon" sizes="16x16" href="favicon.ico" />
     <link rel="apple-touch-icon" href="favicon.svg" />
-    <link rel="canonical" href="{{hostedCanonicalUrl}}" />
-    {{#hostedLanguageLinks}}
-    <link rel="alternate" hreflang="{{language}}" href="{{href}}" />
-    {{/hostedLanguageLinks}}
     {{{htmlHeadSnippet}}}
   </head>
   <body class="hosted-shell">
@@ -43,36 +40,35 @@
       </nav>
     </header>
 
-    <main class="hosted-main">
-      <section class="hosted-hero" aria-labelledby="hosted-home-title">
-        <p class="hosted-eyebrow">{{hostedTranslations.hosted_service_tagline}}</p>
-        <h1 id="hosted-home-title">{{hostedTranslations.hosted_home_title}}</h1>
-        <p class="hosted-intro">{{hostedTranslations.hosted_home_intro}}</p>
-      </section>
-      <section class="hosted-events" aria-labelledby="hosted-events-title">
-        <h2 id="hosted-events-title" class="hosted-account-section-title">{{hostedTranslations.hosted_home_events_title}}</h2>
-        {{#if hostedHasEvents}}
-        <ul class="hosted-event-list">
-          {{#hostedEvents}}
-          <li class="hosted-event-card">
-            <a class="hosted-event-card-link" href="{{href}}">
-              {{#if coverHref}}
-              <img class="hosted-event-card-cover" src="{{coverHref}}" alt="" />
-              {{/if}}
-              <span class="hosted-event-card-name">{{name}}</span>
-              <span class="hosted-event-card-organizer">{{../hostedTranslations.hosted_event_hosted_by}} {{organizerName}}</span>
-              <span class="hosted-event-card-time">{{startsAt}}</span>
-              {{#if tagline}}
-              <span class="hosted-event-card-tagline">{{tagline}}</span>
-              {{/if}}
-            </a>
-          </li>
-          {{/hostedEvents}}
-        </ul>
-        {{else}}
-        <p class="hosted-status" aria-live="polite">{{hostedTranslations.hosted_home_status}}</p>
+    <main class="hosted-main hosted-account-main">
+      <article class="hosted-event-page" aria-labelledby="hosted-event-title">
+        {{#if hostedEventCoverHref}}
+        <img
+          class="hosted-event-cover"
+          src="{{hostedEventCoverHref}}"
+          alt="{{hostedTranslations.hosted_event_cover_alt}}"
+        />
         {{/if}}
-      </section>
+        <p class="hosted-organizer-status-badge">{{hostedEventStatusLabel}}</p>
+        <h1 id="hosted-event-title">{{hostedEventName}}</h1>
+        <p class="hosted-event-organizer">
+          {{hostedTranslations.hosted_event_hosted_by}} {{hostedEventOrganizerName}}
+        </p>
+        {{#if hostedEventTagline}}
+        <p class="hosted-event-tagline">{{hostedEventTagline}}</p>
+        {{/if}}
+        <dl class="hosted-operator-detail">
+          <dt>{{hostedTranslations.hosted_event_starts_label}}</dt>
+          <dd>{{hostedEventStartsAt}}</dd>
+          <dt>{{hostedTranslations.hosted_event_ends_label}}</dt>
+          <dd>{{hostedEventEndsAt}}</dd>
+        </dl>
+        {{#if hostedEventEnded}}
+        <p class="hosted-account-note">{{hostedTranslations.hosted_event_ended_note}}</p>
+        {{else}}
+        <p class="hosted-account-note">{{hostedTranslations.hosted_event_access_note}}</p>
+        {{/if}}
+      </article>
     </main>
 
     <footer class="hosted-footer">

@@ -35,6 +35,8 @@ const HOSTED_TEMPLATE_PATHS = new Set([
   "/organizer-reservation.html",
   "/operator-reservations.html",
   "/operator-reservation.html",
+  "/event.html",
+  "/organizer-event.html",
 ]);
 
 /** @import { HttpResponse, ServerConfig, ServerRuntime } from "../../types/server-runtime.d.ts" */
@@ -264,6 +266,14 @@ function createServerRuntime(config) {
     operatorReservationTemplatePath: configuredTemplatePathWithBundledFallback(
       config,
       "operator-reservation.html",
+    ),
+    eventTemplatePath: configuredTemplatePathWithBundledFallback(
+      config,
+      "event.html",
+    ),
+    organizerEventTemplatePath: configuredTemplatePathWithBundledFallback(
+      config,
+      "organizer-event.html",
     ),
     htmlHeadSnippet,
   });

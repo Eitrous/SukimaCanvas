@@ -111,6 +111,11 @@
         {{#if hostedReservationIsApproved}}
         <p class="hosted-form-success" role="status">{{hostedTranslations.hosted_reservation_approved_note}}</p>
         <p class="hosted-account-note">{{hostedTranslations.hosted_reservation_public_link}}: <code>{{hostedReservationEventPublicPath}}</code></p>
+        {{#if hostedReservationEventManagePath}}
+        <p class="hosted-account-alt">
+          <a class="hosted-primary-link" href="{{hostedReservationEventManagePath}}">{{hostedTranslations.hosted_event_manage_link}}</a>
+        </p>
+        {{/if}}
         {{/if}}
         {{#if hostedReservationIsRejected}}
         <p class="hosted-form-error" role="status">{{hostedTranslations.hosted_reservation_rejected_note}}</p>

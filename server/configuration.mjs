@@ -176,6 +176,18 @@ export const HOSTED_RESERVATION_ATTEMPTS_WINDOW_MS = parseIntegerEnv(
   15 * 60 * 1000,
 );
 
+/** Maximum Brand Asset uploads per account or IP within the window. */
+export const HOSTED_BRAND_ASSET_ATTEMPTS_LIMIT = parseIntegerEnv(
+  "WBO_HOSTED_BRAND_ASSET_ATTEMPTS_LIMIT",
+  20,
+);
+
+/** Window for hosted Brand Asset upload attempt limits. */
+export const HOSTED_BRAND_ASSET_ATTEMPTS_WINDOW_MS = parseIntegerEnv(
+  "WBO_HOSTED_BRAND_ASSET_ATTEMPTS_WINDOW_MS",
+  15 * 60 * 1000,
+);
+
 /** Capacity window buffer added before a reservation's start and after its end. */
 export const HOSTED_CAPACITY_WINDOW_BUFFER_MS = parseIntegerEnv(
   "WBO_HOSTED_CAPACITY_WINDOW_BUFFER_MS",

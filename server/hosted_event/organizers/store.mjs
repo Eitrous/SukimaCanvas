@@ -26,6 +26,23 @@ const MAX_CONTACT_NAME_LENGTH = 120;
 const MAX_CONTACT_EMAIL_LENGTH = 254;
 const MAX_DESCRIPTION_LENGTH = 2000;
 const MAX_OPERATOR_NOTE_LENGTH = 2000;
+/** Public-facing event tagline shown on the discovery card and event page. */
+const MAX_EVENT_TAGLINE_LENGTH = 280;
+
+/**
+ * The lifecycle state of an approved event's board session derived from the
+ * service clock: upcoming before its start, live between start and end, and
+ * ended afterward. Discovery only surfaces events that are not yet ended.
+ *
+ * @param {{startsAtMs: number, endsAtMs: number}} event
+ * @param {number} now
+ * @returns {EventLifecycleState}
+ */
+function eventLifecycleState(event, now) {
+  if (now < event.startsAtMs) return "scheduled";
+  if (now < event.endsAtMs) return "open";
+  return "ended";
+}
 
 /** @typedef {"owner" | "admin"} MemberRole */
 
@@ -112,10 +129,15 @@ const MAX_OPERATOR_NOTE_LENGTH = 2000;
  *   organizerId: string,
  *   name: string,
  *   visibility: "public" | "unlisted",
+ *   tagline: string,
+ *   coverAssetId: string | null,
  *   startsAtMs: number,
  *   endsAtMs: number,
  *   createdAtMs: number,
  * }} StoredEvent
+ */
+/**
+ * @typedef {"scheduled" | "open" | "ended"} EventLifecycleState
  */
 /**
  * @typedef {{
@@ -297,6 +319,10 @@ function createFileOrganizerStore(options) {
     }
     const events = readStoreFile(EVENTS_FILE, { events: [] });
     for (const event of /** @type {StoredEvent[]} */ (events.events || [])) {
+      // Display fields were added after the first events were minted; default
+      // them so older records load without a migration.
+      if (typeof event.tagline !== "string") event.tagline = "";
+      if (event.coverAssetId === undefined) event.coverAssetId = null;
       eventsById.set(event.eventId, event);
       eventIdsByPublicId.set(event.publicId, event.eventId);
     }
@@ -1375,6 +1401,8 @@ function createFileOrganizerStore(options) {
       organizerId: reservation.organizerId,
       name: reservation.eventName,
       visibility: reservation.visibility,
+      tagline: "",
+      coverAssetId: null,
       startsAtMs: reservation.startsAtMs,
       endsAtMs: reservation.endsAtMs,
       createdAtMs: now,
@@ -1497,6 +1525,100 @@ function createFileOrganizerStore(options) {
   }
 
   /**
+   * The event that belongs to an organizer, or null. Cross-organizer ids fail
+   * as absent so nothing about another organizer's events leaks.
+   *
+   * @param {string} organizerId
+   * @param {string} eventId
+   * @returns {StoredEvent | null}
+   */
+  function getEventForOrganizer(organizerId, eventId) {
+    ensureLoaded();
+    const event = eventsById.get(String(eventId || ""));
+    if (!event || event.organizerId !== organizerId) return null;
+    return event;
+  }
+
+  /**
+   * Publicly discoverable events for the homepage: those set to public
+   * visibility whose board session has not yet ended, soonest first. Unlisted
+   * and ended events are never listed. (Cancellation of an approved event is
+   * owned by a later issue; when it lands, its terminal state joins "ended"
+   * here.)
+   *
+   * @param {number} now
+   * @returns {StoredEvent[]}
+   */
+  function listPublicDiscoverableEvents(now) {
+    ensureLoaded();
+    return [...eventsById.values()]
+      .filter(
+        (event) =>
+          event.visibility === "public" &&
+          eventLifecycleState(event, now) !== "ended",
+      )
+      .sort((left, right) => left.startsAtMs - right.startsAtMs);
+  }
+
+  /**
+   * Updates an approved event's public display: its visibility and tagline, and
+   * optionally clears its cover. Owner/Admin-only in the route layer; the store
+   * verifies the event belongs to the organizer.
+   *
+   * @param {{
+   *   organizerId: string,
+   *   eventId: string,
+   *   visibility: "public" | "unlisted",
+   *   tagline?: string,
+   *   removeCover?: boolean,
+   *   actorAccountId: string,
+   * }} input
+   * @returns {Promise<{ok: true} | {ok: false, reason: "not_found"}>}
+   */
+  async function updateEventDisplay(input) {
+    ensureLoaded();
+    const event = getEventForOrganizer(input.organizerId, input.eventId);
+    if (!event) return { ok: false, reason: "not_found" };
+    event.visibility = input.visibility === "public" ? "public" : "unlisted";
+    event.tagline = clampString(input.tagline || "", MAX_EVENT_TAGLINE_LENGTH);
+    if (input.removeCover) event.coverAssetId = null;
+    recordAudit({
+      actorAccountId: String(input.actorAccountId || ""),
+      actorKind: "account",
+      action: "event.display_updated",
+      subjectType: "event",
+      subjectId: event.eventId,
+      organizerId: event.organizerId,
+    });
+    await enqueueWrite(persistNow);
+    return { ok: true };
+  }
+
+  /**
+   * Points an approved event at a validated cover Brand Asset. Owner/Admin-only
+   * in the route layer; the store verifies the event belongs to the organizer.
+   *
+   * @param {{organizerId: string, eventId: string, assetId: string, actorAccountId: string}} input
+   * @returns {Promise<{ok: true} | {ok: false, reason: "not_found"}>}
+   */
+  async function setEventCover(input) {
+    ensureLoaded();
+    const event = getEventForOrganizer(input.organizerId, input.eventId);
+    if (!event) return { ok: false, reason: "not_found" };
+    event.coverAssetId = String(input.assetId || "") || null;
+    recordAudit({
+      actorAccountId: String(input.actorAccountId || ""),
+      actorKind: "account",
+      action: "event.cover_set",
+      subjectType: "event",
+      subjectId: event.eventId,
+      organizerId: event.organizerId,
+    });
+    await enqueueWrite(persistNow);
+    return { ok: true };
+  }
+
+  /**
    * Resolves once every scheduled write has landed on disk.
    *
    * @returns {Promise<void>}
@@ -1542,8 +1664,17 @@ function createFileOrganizerStore(options) {
     listSubmittedReservations,
     getEventById,
     getEventByPublicId,
+    getEventForOrganizer,
+    listPublicDiscoverableEvents,
+    updateEventDisplay,
+    setEventCover,
     flush,
   };
 }
 
-export { createFileOrganizerStore, computeCapacityPeak };
+export {
+  createFileOrganizerStore,
+  computeCapacityPeak,
+  eventLifecycleState,
+  MAX_EVENT_TAGLINE_LENGTH,
+};

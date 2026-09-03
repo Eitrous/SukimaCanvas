@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="{{hostedLanguage}}" dir="{{hostedDirection}}">
+  <head>
+    <meta charset="utf-8" />
+    <title>{{hostedEventName}}</title>
+    <base href="{{baseHref}}" />
+    <link rel="stylesheet" href="hosted.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/x-icon" sizes="16x16" href="favicon.ico" />
+    <link rel="apple-touch-icon" href="favicon.svg" />
+    {{{htmlHeadSnippet}}}
+  </head>
+  <body class="hosted-shell">
+    <header class="hosted-header">
+      <a class="hosted-brand" href=".">SukimaCanvas</a>
+      <nav aria-label="{{hostedTranslations.hosted_language_label}}">
+        {{#if hostedAccount}}
+        <span class="hosted-account-email">{{hostedAccount.email}}</span>
+        <a href="account">{{hostedTranslations.hosted_nav_account}}</a>
+        <a href="organizer">{{hostedTranslations.hosted_nav_organizer}}</a>
+        {{#if hostedAccount.isOperator}}
+        <a href="operator">{{hostedTranslations.hosted_nav_operator}}</a>
+        {{/if}}
+        <a href="logout">{{hostedTranslations.hosted_nav_logout}}</a>
+        {{else}}
+        <a href="login">{{hostedTranslations.hosted_nav_login}}</a>
+        <a href="register">{{hostedTranslations.hosted_nav_register}}</a>
+        {{/if}}
+        <a href="source">{{hostedTranslations.hosted_source_link}}</a>
+        <details class="hosted-language-picker">
+          <summary>{{hostedLanguage}}</summary>
+          <ul>
+            {{#hostedLanguageLinks}}
+            <li><a href="{{href}}" hreflang="{{language}}">{{language}}</a></li>
+            {{/hostedLanguageLinks}}
+          </ul>
+        </details>
+      </nav>
+    </header>
+
+    <main class="hosted-main hosted-account-main">
+      <section class="hosted-account-card" aria-labelledby="hosted-event-manage-title">
+        <h1 id="hosted-event-manage-title">{{hostedTranslations.hosted_event_manage_title}}</h1>
+        <p class="hosted-account-note">{{hostedEventName}} · {{hostedEventStatusLabel}}</p>
+        <p class="hosted-account-alt">
+          <a href="organizers/{{hostedOrganizerId}}/reservations/{{hostedEventReservationId}}">{{hostedTranslations.hosted_event_manage_back}}</a>
+          ·
+          <a href="{{hostedEventPublicHref}}">{{hostedTranslations.hosted_event_view_public}}</a>
+        </p>
+
+        {{#if hostedEventManageError}}
+        <p class="hosted-form-error" role="alert">{{hostedEventManageError}}</p>
+        {{/if}}
+        {{#if hostedEventManageNotice}}
+        <p class="hosted-form-success" role="status">{{hostedEventManageNotice}}</p>
+        {{/if}}
+
+        <p class="hosted-account-note">
+          {{hostedTranslations.hosted_event_public_link}}: <code>{{hostedEventPublicPath}}</code>
+        </p>
+
+        <dl class="hosted-operator-detail">
+          <dt>{{hostedTranslations.hosted_event_starts_label}}</dt>
+          <dd>{{hostedEventStartsAt}}</dd>
+          <dt>{{hostedTranslations.hosted_event_ends_label}}</dt>
+          <dd>{{hostedEventEndsAt}}</dd>
+        </dl>
+
+        <h2 class="hosted-account-section-title">{{hostedTranslations.hosted_event_display_title}}</h2>
+        <form method="post" action="organizers/{{hostedOrganizerId}}/events/{{hostedEventId}}" novalidate>
+          <input type="hidden" name="_csrf" value="{{csrfToken}}" />
+          <div class="hosted-form-field">
+            <label for="hosted-event-visibility">{{hostedTranslations.hosted_reservation_visibility_label}}</label>
+            <select id="hosted-event-visibility" name="visibility">
+              <option value="unlisted" {{#unless hostedEventVisibilityPublic}}selected{{/unless}}>{{hostedTranslations.hosted_reservation_visibility_unlisted}}</option>
+              <option value="public" {{#if hostedEventVisibilityPublic}}selected{{/if}}>{{hostedTranslations.hosted_reservation_visibility_public}}</option>
+            </select>
+          </div>
+          <div class="hosted-form-field">
+            <label for="hosted-event-tagline">{{hostedTranslations.hosted_event_tagline_label}}</label>
+            <textarea
+              id="hosted-event-tagline"
+              name="tagline"
+              rows="3"
+              maxlength="{{hostedEventTaglineMax}}"
+            >{{hostedEventTaglineValue}}</textarea>
+            <p class="hosted-form-hint">{{hostedTranslations.hosted_event_tagline_hint}}</p>
+          </div>
+          <button type="submit" class="hosted-submit">{{hostedTranslations.hosted_event_save}}</button>
+        </form>
+
+        <h2 class="hosted-account-section-title">{{hostedTranslations.hosted_event_cover_label}}</h2>
+        {{#if hostedEventHasCover}}
+        <img class="hosted-event-cover-preview" src="{{hostedEventCoverHref}}" alt="{{hostedTranslations.hosted_event_cover_alt}}" />
+        <form method="post" action="organizers/{{hostedOrganizerId}}/events/{{hostedEventId}}" class="hosted-reservation-action">
+          <input type="hidden" name="_csrf" value="{{csrfToken}}" />
+          <input type="hidden" name="visibility" value="{{#if hostedEventVisibilityPublic}}public{{else}}unlisted{{/if}}" />
+          <input type="hidden" name="tagline" value="{{hostedEventTaglineValue}}" />
+          <input type="hidden" name="removeCover" value="1" />
+          <button type="submit" class="hosted-submit hosted-submit-danger">{{hostedTranslations.hosted_event_cover_remove}}</button>
+        </form>
+        {{/if}}
+        <form method="post" action="organizers/{{hostedOrganizerId}}/events/{{hostedEventId}}/cover" enctype="multipart/form-data">
+          <input type="hidden" name="_csrf" value="{{csrfToken}}" />
+          <div class="hosted-form-field">
+            <label for="hosted-event-cover">{{hostedTranslations.hosted_event_cover_label}}</label>
+            <input type="file" id="hosted-event-cover" name="cover" accept="image/png,image/jpeg,image/webp" required />
+            <p class="hosted-form-hint">{{hostedTranslations.hosted_event_cover_hint}}</p>
+          </div>
+          <button type="submit" class="hosted-submit">{{hostedTranslations.hosted_event_cover_upload}}</button>
+        </form>
+      </section>
+    </main>
+
+    <footer class="hosted-footer">
+      <span>{{hostedTranslations.hosted_service_name}}</span>
+      <a href="source">{{hostedTranslations.hosted_source_link}}</a>
+    </footer>
+  </body>
+</html>
