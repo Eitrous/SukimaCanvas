@@ -3,21 +3,20 @@ import { BoundaryError, badRequest } from "../../http/boundary_errors.mjs";
 import { resolveRequestClientIpSafe } from "../../socket/policy.mjs";
 import { requestScheme } from "../../http/observation.mjs";
 import { publicPath } from "../../http/request_url.mjs";
+import { appendSetCookieHeader } from "../../auth/user_secret_cookie.mjs";
 import {
-  parseCookieHeader,
-  appendSetCookieHeader,
-} from "../../auth/user_secret_cookie.mjs";
-import {
-  HOSTED_CSRF_COOKIE_MAX_AGE_SECONDS,
-  HOSTED_CSRF_COOKIE_NAME,
   HOSTED_SESSION_COOKIE_NAME,
   clearHostedCookie,
-  generateHostedToken,
-  hostedCookiePath,
   readHostedCookie,
   serializeHostedCookie,
-  timingSafeEqualStrings,
 } from "../../auth/hosted_cookies.mjs";
+import {
+  createFormSecurity,
+  firstHeaderValue,
+  readFormBody,
+  seeOther,
+  translate,
+} from "../http_forms.mjs";
 import { isValidNormalizedEmail, normalizeEmail } from "./emails.mjs";
 import {
   hashPassword,
@@ -38,7 +37,6 @@ const { logger } = observability;
  * }} HostedTemplate
  */
 
-const MAX_FORM_BODY_BYTES = 32 * 1024;
 const MIN_PASSWORD_LENGTH = 8;
 const MAX_PASSWORD_LENGTH = 128;
 
@@ -70,35 +68,12 @@ const MAX_PASSWORD_LENGTH = 128;
 function createHostedAccountRoutes(dependencies) {
   const { config, store, mail, captcha, limiter, templates } = dependencies;
   const clock = dependencies.clock || (() => Date.now());
-  const secureCookies = config.IS_DEVELOPMENT !== true;
-  const cookieOptions = () => ({
-    path: hostedCookiePath(config),
-    secure: secureCookies,
-  });
-
-  /**
-   * Returns the browser's CSRF token, issuing a fresh one (with its cookie)
-   * when the request does not carry one yet.
-   *
-   * @param {HttpRouteContext} ctx
-   * @returns {string}
-   */
-  function ensureCsrfToken(ctx) {
-    const existing = readHostedCookie(
-      ctx.request.headers.cookie,
-      HOSTED_CSRF_COOKIE_NAME,
-    );
-    if (existing) return existing;
-    const token = generateHostedToken();
-    appendSetCookieHeader(
-      ctx.response,
-      serializeHostedCookie(HOSTED_CSRF_COOKIE_NAME, token, {
-        ...cookieOptions(),
-        maxAgeSeconds: HOSTED_CSRF_COOKIE_MAX_AGE_SECONDS,
-      }),
-    );
-    return token;
-  }
+  const {
+    cookieOptions,
+    ensureCsrfToken,
+    rotateCsrfToken,
+    requestHasValidCsrf,
+  } = createFormSecurity(config);
 
   /**
    * @param {HttpRouteContext} ctx
@@ -108,65 +83,6 @@ function createHostedAccountRoutes(dependencies) {
     // Falls back to the direct remote address when the configured IP source
     // (for example X-Forwarded-For) is absent on a direct connection.
     return resolveRequestClientIpSafe(config, ctx.request);
-  }
-
-  /**
-   * @param {import("../../http/templating.mjs").Template} template
-   * @param {HttpRouteContext} ctx
-   * @param {string} key
-   * @param {{[name: string]: string}} [substitutions]
-   * @returns {string}
-   */
-  function translate(template, ctx, key, substitutions) {
-    const { translations } = template.translationsFor(ctx.request, ctx.url);
-    let value = translations[key];
-    if (typeof value !== "string" || value === "") value = key;
-    for (const [name, replacement] of Object.entries(substitutions || {})) {
-      value = value.split(`{${name}}`).join(replacement);
-    }
-    return value;
-  }
-
-  /**
-   * @param {import("http").IncomingMessage} request
-   * @returns {Promise<URLSearchParams>}
-   */
-  async function readFormBody(request) {
-    const contentType = firstHeaderValue(request.headers["content-type"]);
-    if (
-      typeof contentType !== "string" ||
-      !contentType.toLowerCase().startsWith("application/x-www-form-urlencoded")
-    ) {
-      throw new BoundaryError(415, "unsupported_form_media_type");
-    }
-    /** @type {Buffer[]} */
-    const chunks = [];
-    let totalBytes = 0;
-    for await (const chunk of request) {
-      totalBytes += chunk.length;
-      if (totalBytes > MAX_FORM_BODY_BYTES) {
-        throw new BoundaryError(413, "form_body_too_large");
-      }
-      chunks.push(chunk);
-    }
-    return new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
-  }
-
-  /**
-   * @param {URLSearchParams} form
-   * @param {{[name: string]: string}} cookies
-   * @returns {boolean}
-   */
-  function hasValidCsrf(form, cookies) {
-    const submitted = form.get("_csrf");
-    const expected = cookies[HOSTED_CSRF_COOKIE_NAME];
-    return (
-      typeof submitted === "string" &&
-      submitted.length >= 16 &&
-      typeof expected === "string" &&
-      expected.length >= 16 &&
-      timingSafeEqualStrings(submitted, expected)
-    );
   }
 
   /**
@@ -250,24 +166,6 @@ function createHostedAccountRoutes(dependencies) {
   }
 
   /**
-   * Issues a fresh CSRF token and cookie, invalidating every previously
-   * issued token for this browser (used after login and logout so tokens do
-   * not survive a security-relevant session transition).
-   *
-   * @param {HttpRouteContext} ctx
-   * @returns {void}
-   */
-  function rotateCsrfToken(ctx) {
-    appendSetCookieHeader(
-      ctx.response,
-      serializeHostedCookie(HOSTED_CSRF_COOKIE_NAME, generateHostedToken(), {
-        ...cookieOptions(),
-        maxAgeSeconds: HOSTED_CSRF_COOKIE_MAX_AGE_SECONDS,
-      }),
-    );
-  }
-
-  /**
    * @param {HttpRouteContext} ctx
    * @param {string} rawSessionId
    * @returns {void}
@@ -283,16 +181,6 @@ function createHostedAccountRoutes(dependencies) {
         ),
       }),
     );
-  }
-
-  /**
-   * @param {HttpRouteContext} ctx
-   * @param {string} location
-   * @returns {void}
-   */
-  function seeOther(ctx, location) {
-    ctx.response.writeHead(303, { Location: location });
-    ctx.response.end();
   }
 
   // --- registration -------------------------------------------------------
@@ -354,7 +242,7 @@ function createHostedAccountRoutes(dependencies) {
    */
   async function admitSubmission(ctx, kind) {
     const form = await readFormBody(ctx.request);
-    if (!hasValidCsrf(form, parseCookieHeader(ctx.request.headers.cookie))) {
+    if (!requestHasValidCsrf(ctx.request, form)) {
       renderSubmissionFailure(ctx, kind, 403, "hosted_error_csrf", {});
       return null;
     }
@@ -644,7 +532,7 @@ function createHostedAccountRoutes(dependencies) {
    */
   async function handleLogoutSubmission(ctx) {
     const form = await readFormBody(ctx.request);
-    if (!hasValidCsrf(form, parseCookieHeader(ctx.request.headers.cookie))) {
+    if (!requestHasValidCsrf(ctx.request, form)) {
       templates.logout.serveWithStatus(ctx.request, ctx.response, 403, {
         hostedLogoutError: translate(
           templates.logout,
@@ -813,7 +701,7 @@ function createHostedAccountRoutes(dependencies) {
         csrfToken: ensureCsrfToken(ctx),
       });
     }
-    if (!hasValidCsrf(form, parseCookieHeader(ctx.request.headers.cookie))) {
+    if (!requestHasValidCsrf(ctx.request, form)) {
       renderResetRetry(403, "hosted_error_csrf");
       return;
     }
@@ -942,7 +830,7 @@ function createHostedAccountRoutes(dependencies) {
       return;
     }
     const form = await readFormBody(ctx.request);
-    if (!hasValidCsrf(form, parseCookieHeader(ctx.request.headers.cookie))) {
+    if (!requestHasValidCsrf(ctx.request, form)) {
       await renderAccountPage(ctx, 403, { errorKey: "hosted_error_csrf" });
       return;
     }
@@ -1006,7 +894,7 @@ function createHostedAccountRoutes(dependencies) {
       return;
     }
     const form = await readFormBody(ctx.request);
-    if (!hasValidCsrf(form, parseCookieHeader(ctx.request.headers.cookie))) {
+    if (!requestHasValidCsrf(ctx.request, form)) {
       await renderAccountPage(ctx, 403, { errorKey: "hosted_error_csrf" });
       return;
     }
@@ -1033,7 +921,7 @@ function createHostedAccountRoutes(dependencies) {
       return;
     }
     const form = await readFormBody(ctx.request);
-    if (!hasValidCsrf(form, parseCookieHeader(ctx.request.headers.cookie))) {
+    if (!requestHasValidCsrf(ctx.request, form)) {
       await renderAccountPage(ctx, 403, { errorKey: "hosted_error_csrf" });
       return;
     }
@@ -1102,14 +990,6 @@ function resolveSignedInAccountFromRequest(store, request) {
     email: account.email,
     publicId: session.publicId,
   };
-}
-
-/**
- * @param {string | string[] | undefined} value
- * @returns {string | undefined}
- */
-function firstHeaderValue(value) {
-  return Array.isArray(value) ? value[0] : value;
 }
 
 /**

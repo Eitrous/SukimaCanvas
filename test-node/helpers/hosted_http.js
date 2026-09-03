@@ -163,6 +163,46 @@ async function verifyAccount(app, outboxDir, email) {
 }
 
 /**
+ * Registers an account through the composed server (age-confirmed, CAPTCHA
+ * disabled by default in tests).
+ *
+ * @param {import("http").Server} app
+ * @param {string} email
+ * @param {string} password
+ */
+async function registerAccount(app, email, password) {
+  const registerPage = await requestWithCookies(app, "/register?lang=en");
+  const csrfCookie = cookiePair(registerPage.setCookie, "hosted-csrf-v1");
+  const registered = await requestWithCookies(app, "/register", {
+    method: "POST",
+    cookie: csrfCookie,
+    body: new URLSearchParams({
+      _csrf: formValue(registerPage.body, "_csrf"),
+      email,
+      password,
+      ageConfirmation: "1",
+    }).toString(),
+  });
+  assert.equal(registered.statusCode, 200);
+}
+
+/**
+ * Registers, verifies through the outbox link, and logs in, returning the
+ * signed-in cookie jar.
+ *
+ * @param {import("http").Server} app
+ * @param {string} outboxDir
+ * @param {string} email
+ * @param {string} password
+ * @returns {Promise<{sessionCookie: string, csrfCookie: string}>}
+ */
+async function signUpAndLogin(app, outboxDir, email, password) {
+  await registerAccount(app, email, password);
+  await verifyAccount(app, outboxDir, email);
+  return loginSession(app, email, password);
+}
+
+/**
  * Logs a session in with its own cookie jar and returns both cookie pairs.
  *
  * @param {import("http").Server} app
@@ -198,5 +238,7 @@ module.exports = {
   cookiePair,
   cookieAttributes,
   verifyAccount,
+  registerAccount,
+  signUpAndLogin,
   loginSession,
 };

@@ -417,3 +417,108 @@ h1 {
   padding: 6px 10px;
   font-size: 12px;
 }
+
+.hosted-submit-danger {
+  border-color: #c05353;
+  color: #8f2f2f;
+}
+
+.hosted-submit-danger:hover,
+.hosted-submit-danger:focus {
+  border-color: #8f2f2f;
+}
+
+.hosted-organizer-status {
+  margin: 12px 0 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--hosted-border);
+  border-radius: 2px;
+  background: var(--hosted-surface);
+}
+
+.hosted-organizer-status-badge {
+  margin: 0 0 6px;
+  font-weight: 600;
+}
+
+.hosted-organizer-status-approved {
+  border-color: #6f9f7f;
+}
+
+.hosted-organizer-status-rejected {
+  border-color: #c05353;
+}
+
+.hosted-operator-queue {
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+
+.hosted-operator-queue-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--hosted-border);
+}
+
+.hosted-operator-queue-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--hosted-muted);
+  font-size: 12px;
+}
+
+.hosted-operator-queue-name {
+  color: var(--hosted-text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.hosted-operator-detail {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) 1fr;
+  gap: 6px 16px;
+  margin: 12px 0 20px;
+}
+
+.hosted-operator-detail dt {
+  color: var(--hosted-muted);
+  font-size: 12px;
+}
+
+.hosted-operator-detail dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.hosted-operator-decision {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 4px 0 8px;
+}
+
+.hosted-operator-audit {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hosted-operator-audit-item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--hosted-border);
+  color: var(--hosted-muted);
+  font-size: 12px;
+}
+
+.hosted-operator-audit-action {
+  color: var(--hosted-text);
+  font-weight: 600;
+}

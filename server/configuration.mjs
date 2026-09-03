@@ -6,6 +6,7 @@ import {
   parseCommaSeparatedEnv,
   parseBooleanEnv,
   parseDisabledFlagEnv,
+  parseEmailListEnv,
   parseEnumEnv,
   parseIntegerEnv,
   parseIpConfigurationEnv,
@@ -126,6 +127,28 @@ export const HOSTED_LOGIN_ATTEMPTS_LIMIT = parseIntegerEnv(
 /** Window for hosted login attempt limits. */
 export const HOSTED_LOGIN_ATTEMPTS_WINDOW_MS = parseIntegerEnv(
   "WBO_HOSTED_LOGIN_ATTEMPTS_WINDOW_MS",
+  15 * 60 * 1000,
+);
+
+/**
+ * Normalized email addresses provisioned as Platform Operators. Operators are
+ * granted by deployment config rather than self-service registration: a
+ * signed-in, verified, active Account whose email is in this list may use the
+ * operator console to review Organizer Applications.
+ */
+export const HOSTED_OPERATOR_EMAILS = parseEmailListEnv(
+  "WBO_HOSTED_OPERATOR_EMAILS",
+);
+
+/** Maximum organizer-application submissions per account or IP within the window. */
+export const HOSTED_ORGANIZER_APPLY_ATTEMPTS_LIMIT = parseIntegerEnv(
+  "WBO_HOSTED_ORGANIZER_APPLY_ATTEMPTS_LIMIT",
+  10,
+);
+
+/** Window for hosted organizer-application attempt limits. */
+export const HOSTED_ORGANIZER_APPLY_ATTEMPTS_WINDOW_MS = parseIntegerEnv(
+  "WBO_HOSTED_ORGANIZER_APPLY_ATTEMPTS_WINDOW_MS",
   15 * 60 * 1000,
 );
 

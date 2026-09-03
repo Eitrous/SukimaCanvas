@@ -7,7 +7,7 @@ import { serveError } from "../http/observation.mjs";
  * concept, so each route rejects with a deterministic 404 instead of falling
  * through to static file resolution.
  *
- * @param {keyof Pick<HostedEventModule, "serveRegister" | "serveLogin" | "serveVerify" | "serveLogout" | "serveForgot" | "serveReset" | "serveAccount" | "serveAccountPassword" | "serveAccountSessionRevoke" | "serveAccountSessionsRevokeOthers">} handlerName
+ * @param {keyof Pick<HostedEventModule, "serveRegister" | "serveLogin" | "serveVerify" | "serveLogout" | "serveForgot" | "serveReset" | "serveAccount" | "serveAccountPassword" | "serveAccountSessionRevoke" | "serveAccountSessionsRevokeOthers" | "serveOrganizerApply" | "serveOperatorConsole" | "serveOperatorApplication" | "serveOperatorApproveApplication" | "serveOperatorRejectApplication">} handlerName
  * @returns {import("../../types/server-runtime.d.ts").HttpRouteHandler}
  */
 function serveHostedAccountPage(handlerName) {
@@ -41,4 +41,19 @@ export const serveAccountSessionRevoke = serveHostedAccountPage(
 );
 export const serveAccountSessionsRevokeOthers = serveHostedAccountPage(
   "serveAccountSessionsRevokeOthers",
+);
+export const serveOrganizerApply = serveHostedAccountPage(
+  "serveOrganizerApply",
+);
+export const serveOperatorConsole = serveHostedAccountPage(
+  "serveOperatorConsole",
+);
+export const serveOperatorApplication = serveHostedAccountPage(
+  "serveOperatorApplication",
+);
+export const serveOperatorApproveApplication = serveHostedAccountPage(
+  "serveOperatorApproveApplication",
+);
+export const serveOperatorRejectApplication = serveHostedAccountPage(
+  "serveOperatorRejectApplication",
 );

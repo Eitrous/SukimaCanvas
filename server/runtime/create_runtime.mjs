@@ -26,6 +26,9 @@ const HOSTED_TEMPLATE_PATHS = new Set([
   "/forgot.html",
   "/reset.html",
   "/account.html",
+  "/organizer-apply.html",
+  "/operator.html",
+  "/operator-application.html",
 ]);
 
 /** @import { HttpResponse, ServerConfig, ServerRuntime } from "../../types/server-runtime.d.ts" */
@@ -218,6 +221,18 @@ function createServerRuntime(config) {
     accountTemplatePath: configuredTemplatePathWithBundledFallback(
       config,
       "account.html",
+    ),
+    organizerApplyTemplatePath: configuredTemplatePathWithBundledFallback(
+      config,
+      "organizer-apply.html",
+    ),
+    operatorTemplatePath: configuredTemplatePathWithBundledFallback(
+      config,
+      "operator.html",
+    ),
+    operatorApplicationTemplatePath: configuredTemplatePathWithBundledFallback(
+      config,
+      "operator-application.html",
     ),
     htmlHeadSnippet,
   });

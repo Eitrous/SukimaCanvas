@@ -21,6 +21,10 @@
         {{#if hostedAccount}}
         <span class="hosted-account-email">{{hostedAccount.email}}</span>
         <a href="account">{{hostedTranslations.hosted_nav_account}}</a>
+        <a href="organizer/apply">{{hostedTranslations.hosted_nav_organizer_apply}}</a>
+        {{#if hostedAccount.isOperator}}
+        <a href="operator">{{hostedTranslations.hosted_nav_operator}}</a>
+        {{/if}}
         <a href="logout">{{hostedTranslations.hosted_nav_logout}}</a>
         {{else}}
         <a href="login">{{hostedTranslations.hosted_nav_login}}</a>

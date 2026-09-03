@@ -7,6 +7,8 @@ import {
   resolveSignedInAccountFromRequest,
 } from "./accounts/routes.mjs";
 import { createFileAccountStore } from "./accounts/store.mjs";
+import { createOrganizerRoutes } from "./organizers/routes.mjs";
+import { createFileOrganizerStore } from "./organizers/store.mjs";
 
 /** @import { HttpRequest, HttpResponse, ServerConfig } from "../../types/server-runtime.d.ts" */
 
@@ -30,7 +32,7 @@ class HostedPageTemplate extends Template {
   /**
    * @param {string} templatePath
    * @param {ServerConfig} serverConfig
-   * @param {{htmlHeadSnippet?: string, resolveAccount?: (request: HttpRequest) => {accountId: string, email: string} | null}} [options]
+   * @param {{htmlHeadSnippet?: string, resolveAccount?: (request: HttpRequest) => {accountId: string, email: string, isOperator: boolean} | null}} [options]
    */
   constructor(templatePath, serverConfig, options) {
     super(templatePath, serverConfig, {
@@ -69,7 +71,9 @@ class HostedPageTemplate extends Template {
     // shared caches or stored by browsers.
     params.varyCookie = true;
     const account = this.resolveAccount ? this.resolveAccount(request) : null;
-    params.hostedAccount = account ? { email: account.email } : null;
+    params.hostedAccount = account
+      ? { email: account.email, isOperator: account.isOperator }
+      : null;
     return params;
   }
 
@@ -107,6 +111,9 @@ class HostedPageTemplate extends Template {
  *   forgotTemplatePath: string,
  *   resetTemplatePath: string,
  *   accountTemplatePath: string,
+ *   organizerApplyTemplatePath: string,
+ *   operatorTemplatePath: string,
+ *   operatorApplicationTemplatePath: string,
  *   htmlHeadSnippet?: string,
  * }} paths
  * @returns {import("../../types/server-runtime.d.ts").HostedEventModule}
@@ -126,11 +133,29 @@ function createHostedEventModule(config, paths) {
     verificationTokenTtlMs: config.HOSTED_VERIFICATION_TOKEN_TTL_MS,
     passwordResetTtlMs: config.HOSTED_PASSWORD_RESET_TTL_MS,
   });
+  const organizerStore = createFileOrganizerStore({
+    dataDir: config.HOSTED_DATA_DIR,
+    clock,
+  });
+  // Platform Operators are provisioned by deployment config rather than
+  // self-service registration: an account whose verified email is listed is an
+  // operator. Emails in the config are already normalized (trimmed, lowercased)
+  // to match the store's normalized account emails.
+  const operatorEmails = new Set(
+    Array.isArray(config.HOSTED_OPERATOR_EMAILS)
+      ? config.HOSTED_OPERATOR_EMAILS
+      : [],
+  );
+  const limiter = createRateLimiter({ clock });
   // Every hosted page renders the session-aware header, including home and
-  // source, so all hosted templates share the account resolver.
-  /** @type {(request: HttpRequest) => {accountId: string, email: string} | null} */
-  const resolveAccount = (request) =>
-    resolveSignedInAccountFromRequest(store, request);
+  // source, so all hosted templates share the account resolver. It also reports
+  // operator status so the shared header can offer the operator console link.
+  /** @type {(request: HttpRequest) => {accountId: string, email: string, isOperator: boolean} | null} */
+  const resolveAccount = (request) => {
+    const account = resolveSignedInAccountFromRequest(store, request);
+    if (!account) return null;
+    return { ...account, isOperator: operatorEmails.has(account.email) };
+  };
   const templateOptions = {
     htmlHeadSnippet: paths.htmlHeadSnippet,
     resolveAccount,
@@ -153,7 +178,7 @@ function createHostedEventModule(config, paths) {
     store,
     mail: createOutboxMailDelivery(config),
     captcha: createHostedCaptcha(config),
-    limiter: createRateLimiter({ clock }),
+    limiter,
     templates: {
       register: new HostedPageTemplate(
         paths.registerTemplatePath,
@@ -193,6 +218,31 @@ function createHostedEventModule(config, paths) {
     },
   });
 
+  const organizerRoutes = createOrganizerRoutes({
+    config,
+    accountStore: store,
+    organizerStore,
+    limiter,
+    operatorEmails,
+    templates: {
+      organizerApply: new HostedPageTemplate(
+        paths.organizerApplyTemplatePath,
+        config,
+        templateOptions,
+      ),
+      operator: new HostedPageTemplate(
+        paths.operatorTemplatePath,
+        config,
+        templateOptions,
+      ),
+      operatorApplication: new HostedPageTemplate(
+        paths.operatorApplicationTemplatePath,
+        config,
+        templateOptions,
+      ),
+    },
+  });
+
   return {
     enabled: config.HOSTED_MODE === true,
     serveHome(ctx) {
@@ -212,6 +262,7 @@ function createHostedEventModule(config, paths) {
       });
     },
     ...accountRoutes,
+    ...organizerRoutes,
   };
 }
 

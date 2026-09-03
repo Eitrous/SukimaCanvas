@@ -91,6 +91,27 @@ export function parseCommaSeparatedEnv(name, env = process.env) {
 }
 
 /**
+ * Parses a comma-separated list of email addresses into a deduplicated array of
+ * trimmed, lowercased entries. Empty entries are dropped. Used to provision
+ * privileged identities (such as Platform Operators) from deployment config
+ * rather than self-service registration.
+ *
+ * @param {string} name
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {string[]}
+ */
+export function parseEmailListEnv(name, env = process.env) {
+  const value = env[name];
+  if (value === undefined || value.trim() === "") return [];
+  const seen = new Set();
+  for (const entry of value.split(",")) {
+    const normalized = entry.trim().toLowerCase();
+    if (normalized !== "") seen.add(normalized);
+  }
+  return [...seen];
+}
+
+/**
  * @param {string} name
  * @param {NodeJS.ProcessEnv} [env]
  * @returns {boolean}

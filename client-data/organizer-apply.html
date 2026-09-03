@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="{{hostedLanguage}}" dir="{{hostedDirection}}">
+  <head>
+    <meta charset="utf-8" />
+    <title>{{hostedTranslations.hosted_organizer_apply_title}}</title>
+    <base href="{{baseHref}}" />
+    <link rel="stylesheet" href="hosted.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/x-icon" sizes="16x16" href="favicon.ico" />
+    <link rel="apple-touch-icon" href="favicon.svg" />
+    <link rel="canonical" href="{{hostedCanonicalUrl}}" />
+    {{#hostedLanguageLinks}}
+    <link rel="alternate" hreflang="{{language}}" href="{{href}}" />
+    {{/hostedLanguageLinks}}
+    {{{htmlHeadSnippet}}}
+  </head>
+  <body class="hosted-shell">
+    <header class="hosted-header">
+      <a class="hosted-brand" href=".">SukimaCanvas</a>
+      <nav aria-label="{{hostedTranslations.hosted_language_label}}">
+        {{#if hostedAccount}}
+        <span class="hosted-account-email">{{hostedAccount.email}}</span>
+        <a href="account">{{hostedTranslations.hosted_nav_account}}</a>
+        <a href="organizer/apply">{{hostedTranslations.hosted_nav_organizer_apply}}</a>
+        {{#if hostedAccount.isOperator}}
+        <a href="operator">{{hostedTranslations.hosted_nav_operator}}</a>
+        {{/if}}
+        <a href="logout">{{hostedTranslations.hosted_nav_logout}}</a>
+        {{else}}
+        <a href="login">{{hostedTranslations.hosted_nav_login}}</a>
+        <a href="register">{{hostedTranslations.hosted_nav_register}}</a>
+        {{/if}}
+        <a href="source">{{hostedTranslations.hosted_source_link}}</a>
+        <details class="hosted-language-picker">
+          <summary>{{hostedLanguage}}</summary>
+          <ul>
+            {{#hostedLanguageLinks}}
+            <li><a href="{{href}}" hreflang="{{language}}">{{language}}</a></li>
+            {{/hostedLanguageLinks}}
+          </ul>
+        </details>
+      </nav>
+    </header>
+
+    <main class="hosted-main hosted-account-main">
+      <section class="hosted-account-card" aria-labelledby="hosted-organizer-title">
+        <h1 id="hosted-organizer-title">{{hostedTranslations.hosted_organizer_apply_title}}</h1>
+        <p class="hosted-account-intro">{{hostedTranslations.hosted_organizer_apply_intro}}</p>
+
+        {{#if hostedOrganizerApplySuccess}}
+        <p class="hosted-form-success" role="status">{{hostedOrganizerApplySuccess}}</p>
+        {{/if}}
+        {{#if hostedOrganizerApplyError}}
+        <p class="hosted-form-error" role="alert">{{hostedOrganizerApplyError}}</p>
+        {{/if}}
+
+        {{#if hostedOrganizerHasApplication}}
+        <section
+          class="hosted-organizer-status hosted-organizer-status-{{hostedOrganizerStatus.variant}}"
+          aria-labelledby="hosted-organizer-status-title"
+        >
+          <h2 id="hosted-organizer-status-title" class="hosted-account-section-title">
+            {{hostedTranslations.hosted_organizer_status_title}}
+          </h2>
+          <p class="hosted-organizer-status-badge">{{hostedOrganizerStatus.title}}</p>
+          <p class="hosted-account-note">{{hostedOrganizerStatus.body}}</p>
+          <p class="hosted-form-hint">
+            {{hostedTranslations.hosted_organizer_status_submitted_at}}: {{hostedOrganizerStatus.submittedAt}}
+          </p>
+        </section>
+        {{/if}}
+
+        {{#if hostedOrganizerShowForm}}
+        <form method="post" action="organizer/apply" novalidate>
+          <input type="hidden" name="_csrf" value="{{csrfToken}}" />
+          <div class="hosted-form-field">
+            <label for="hosted-organizer-name">{{hostedTranslations.hosted_organizer_name_label}}</label>
+            <input
+              type="text"
+              id="hosted-organizer-name"
+              name="organizerName"
+              value="{{hostedOrganizerNameValue}}"
+              required
+              maxlength="120"
+              autocomplete="organization"
+            />
+          </div>
+          <div class="hosted-form-field">
+            <label for="hosted-organizer-contact-name">{{hostedTranslations.hosted_organizer_contact_name_label}}</label>
+            <input
+              type="text"
+              id="hosted-organizer-contact-name"
+              name="contactName"
+              value="{{hostedOrganizerContactNameValue}}"
+              required
+              maxlength="120"
+              autocomplete="name"
+            />
+          </div>
+          <div class="hosted-form-field">
+            <label for="hosted-organizer-contact-email">{{hostedTranslations.hosted_organizer_contact_email_label}}</label>
+            <input
+              type="email"
+              id="hosted-organizer-contact-email"
+              name="contactEmail"
+              value="{{hostedOrganizerContactEmailValue}}"
+              required
+              maxlength="254"
+              autocomplete="email"
+            />
+          </div>
+          <div class="hosted-form-field">
+            <label for="hosted-organizer-description">{{hostedTranslations.hosted_organizer_description_label}}</label>
+            <textarea
+              id="hosted-organizer-description"
+              name="description"
+              rows="5"
+              maxlength="2000"
+            >{{hostedOrganizerDescriptionValue}}</textarea>
+            <p class="hosted-form-hint">{{hostedTranslations.hosted_organizer_description_hint}}</p>
+          </div>
+          <button type="submit" class="hosted-submit">{{hostedTranslations.hosted_organizer_apply_submit}}</button>
+        </form>
+        {{/if}}
+      </section>
+    </main>
+
+    <footer class="hosted-footer">
+      <span>{{hostedTranslations.hosted_service_name}}</span>
+      <a href="source">{{hostedTranslations.hosted_source_link}}</a>
+    </footer>
+  </body>
+</html>
