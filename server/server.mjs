@@ -12,9 +12,15 @@ import {
 } from "./routes/board_assets.mjs";
 import { redirectBoardQuery, serveBoardPage } from "./routes/board_page.mjs";
 import {
+  serveAccount,
+  serveAccountPassword,
+  serveAccountSessionRevoke,
+  serveAccountSessionsRevokeOthers,
+  serveForgot,
   serveLogin,
   serveLogout,
   serveRegister,
+  serveReset,
   serveVerify,
 } from "./routes/hosted_pages.mjs";
 import {
@@ -65,6 +71,20 @@ function createWhiteboardHttpHandler() {
     route("/login", serveLogin, "hosted_login"),
     route("/verify", serveVerify, "hosted_verify"),
     route("/logout", serveLogout, "hosted_logout"),
+    route("/forgot", serveForgot, "hosted_forgot"),
+    route("/reset", serveReset, "hosted_reset"),
+    route("/account", serveAccount, "hosted_account"),
+    route("/account/password", serveAccountPassword, "hosted_account_password"),
+    route(
+      "/account/sessions/revoke",
+      serveAccountSessionRevoke,
+      "hosted_account_session_revoke",
+    ),
+    route(
+      "/account/sessions/revoke-others",
+      serveAccountSessionsRevokeOthers,
+      "hosted_account_sessions_revoke_others",
+    ),
     route("/manifest.json", serveManifest, "manifest"),
     route("/", serveRoot, "index"),
     route("*", serveStaticAsset, "static_file"),

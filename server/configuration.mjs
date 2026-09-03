@@ -77,6 +77,34 @@ export const HOSTED_VERIFICATION_TOKEN_TTL_MS = parseIntegerEnv(
   24 * 60 * 60 * 1000,
 );
 
+/** How long a hosted account password reset link stays valid. */
+export const HOSTED_PASSWORD_RESET_TTL_MS = parseIntegerEnv(
+  "WBO_HOSTED_PASSWORD_RESET_TTL_MS",
+  60 * 60 * 1000,
+);
+
+/** Maximum forgot-password submissions per client IP or email within the forgot window. */
+export const HOSTED_FORGOT_ATTEMPTS_LIMIT = parseIntegerEnv(
+  "WBO_HOSTED_FORGOT_ATTEMPTS_LIMIT",
+  5,
+);
+
+/** Window for hosted forgot-password attempt limits. */
+export const HOSTED_FORGOT_ATTEMPTS_WINDOW_MS = parseIntegerEnv(
+  "WBO_HOSTED_FORGOT_ATTEMPTS_WINDOW_MS",
+  15 * 60 * 1000,
+);
+
+/**
+ * Injectable server-authoritative clock for hosted account flows. Never read
+ * from the environment; deployments keep this undefined (meaning `Date.now`)
+ * and isolated tests override the composed config object with a controlled
+ * clock adapter.
+ *
+ * @type {(() => number) | undefined}
+ */
+export const HOSTED_CLOCK = undefined;
+
 /** Maximum registration submissions per client IP or email within the register window. */
 export const HOSTED_REGISTER_ATTEMPTS_LIMIT = parseIntegerEnv(
   "WBO_HOSTED_REGISTER_ATTEMPTS_LIMIT",

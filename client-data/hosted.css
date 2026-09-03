@@ -371,3 +371,49 @@ h1 {
     gap: 8px;
   }
 }
+
+.hosted-account-section-title {
+  margin: 26px 0 12px;
+  padding-top: 18px;
+  border-top: 1px solid var(--hosted-border);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.hosted-session-list {
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+
+.hosted-session-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--hosted-border);
+}
+
+.hosted-session-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--hosted-muted);
+  font-size: 12px;
+}
+
+.hosted-session-current {
+  align-self: flex-start;
+  padding: 1px 6px;
+  border: 1px solid var(--hosted-border-strong);
+  border-radius: 2px;
+  color: var(--hosted-text);
+  font-size: 11px;
+}
+
+.hosted-submit-small {
+  padding: 6px 10px;
+  font-size: 12px;
+}

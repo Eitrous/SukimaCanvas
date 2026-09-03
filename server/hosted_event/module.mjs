@@ -104,16 +104,27 @@ class HostedPageTemplate extends Template {
  *   loginTemplatePath: string,
  *   verifyTemplatePath: string,
  *   logoutTemplatePath: string,
+ *   forgotTemplatePath: string,
+ *   resetTemplatePath: string,
+ *   accountTemplatePath: string,
  *   htmlHeadSnippet?: string,
  * }} paths
  * @returns {import("../../types/server-runtime.d.ts").HostedEventModule}
  */
 function createHostedEventModule(config, paths) {
+  // The clock is an injectable adapter: deployments use the Date.now
+  // default, isolated tests override it through the composed config object
+  // so expiry and revocation are exercised against server-authoritative
+  // time without sleeps.
+  const clock =
+    typeof config.HOSTED_CLOCK === "function" ? config.HOSTED_CLOCK : undefined;
   const store = createFileAccountStore({
     dataDir: config.HOSTED_DATA_DIR,
+    clock,
     sessionMaxAgeMs: config.HOSTED_SESSION_MAX_AGE_MS,
     sessionIdleMs: config.HOSTED_SESSION_IDLE_TIMEOUT_MS,
     verificationTokenTtlMs: config.HOSTED_VERIFICATION_TOKEN_TTL_MS,
+    passwordResetTtlMs: config.HOSTED_PASSWORD_RESET_TTL_MS,
   });
   // Every hosted page renders the session-aware header, including home and
   // source, so all hosted templates share the account resolver.
@@ -138,10 +149,11 @@ function createHostedEventModule(config, paths) {
 
   const accountRoutes = createHostedAccountRoutes({
     config,
+    clock,
     store,
     mail: createOutboxMailDelivery(config),
     captcha: createHostedCaptcha(config),
-    limiter: createRateLimiter(),
+    limiter: createRateLimiter({ clock }),
     templates: {
       register: new HostedPageTemplate(
         paths.registerTemplatePath,
@@ -160,6 +172,21 @@ function createHostedEventModule(config, paths) {
       ),
       logout: new HostedPageTemplate(
         paths.logoutTemplatePath,
+        config,
+        templateOptions,
+      ),
+      forgot: new HostedPageTemplate(
+        paths.forgotTemplatePath,
+        config,
+        templateOptions,
+      ),
+      reset: new HostedPageTemplate(
+        paths.resetTemplatePath,
+        config,
+        templateOptions,
+      ),
+      account: new HostedPageTemplate(
+        paths.accountTemplatePath,
         config,
         templateOptions,
       ),

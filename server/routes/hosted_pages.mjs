@@ -7,7 +7,7 @@ import { serveError } from "../http/observation.mjs";
  * concept, so each route rejects with a deterministic 404 instead of falling
  * through to static file resolution.
  *
- * @param {keyof Pick<HostedEventModule, "serveRegister" | "serveLogin" | "serveVerify" | "serveLogout">} handlerName
+ * @param {keyof Pick<HostedEventModule, "serveRegister" | "serveLogin" | "serveVerify" | "serveLogout" | "serveForgot" | "serveReset" | "serveAccount" | "serveAccountPassword" | "serveAccountSessionRevoke" | "serveAccountSessionsRevokeOthers">} handlerName
  * @returns {import("../../types/server-runtime.d.ts").HttpRouteHandler}
  */
 function serveHostedAccountPage(handlerName) {
@@ -30,3 +30,15 @@ export const serveRegister = serveHostedAccountPage("serveRegister");
 export const serveLogin = serveHostedAccountPage("serveLogin");
 export const serveVerify = serveHostedAccountPage("serveVerify");
 export const serveLogout = serveHostedAccountPage("serveLogout");
+export const serveForgot = serveHostedAccountPage("serveForgot");
+export const serveReset = serveHostedAccountPage("serveReset");
+export const serveAccount = serveHostedAccountPage("serveAccount");
+export const serveAccountPassword = serveHostedAccountPage(
+  "serveAccountPassword",
+);
+export const serveAccountSessionRevoke = serveHostedAccountPage(
+  "serveAccountSessionRevoke",
+);
+export const serveAccountSessionsRevokeOthers = serveHostedAccountPage(
+  "serveAccountSessionsRevokeOthers",
+);

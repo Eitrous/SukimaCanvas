@@ -985,9 +985,11 @@ test("server inserts configured html head snippet into rendered html pages", asy
     assertSnippetBeforeHeadEnd(indexResponse.body, snippet);
     assertSnippetBeforeHeadEnd(boardResponse.body, snippet);
     assertSnippetBeforeHeadEnd(errorResponse.body, snippet);
-    assert.doesNotMatch(indexResponse.body, /changed/);
-    assert.doesNotMatch(boardResponse.body, /changed/);
-    assert.doesNotMatch(errorResponse.body, /changed/);
+    // The startup-only snippet must render verbatim: the rewritten file's
+    // payload (not merely any occurrence of the word) must never leak.
+    assert.doesNotMatch(indexResponse.body, /__wboTestAnalytics = 'changed'/);
+    assert.doesNotMatch(boardResponse.body, /__wboTestAnalytics = 'changed'/);
+    assert.doesNotMatch(errorResponse.body, /__wboTestAnalytics = 'changed'/);
   } finally {
     await closeServer(app);
   }

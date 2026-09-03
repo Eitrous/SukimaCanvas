@@ -20,6 +20,7 @@
       <nav aria-label="{{hostedTranslations.hosted_language_label}}">
         {{#if hostedAccount}}
         <span class="hosted-account-email">{{hostedAccount.email}}</span>
+        <a href="account">{{hostedTranslations.hosted_nav_account}}</a>
         <a href="logout">{{hostedTranslations.hosted_nav_logout}}</a>
         {{else}}
         <a href="login">{{hostedTranslations.hosted_nav_login}}</a>
@@ -51,6 +52,9 @@
         <p class="hosted-account-intro">{{hostedTranslations.hosted_login_intro}}</p>
         {{#if hostedLoginVerifiedNotice}}
         <p class="hosted-form-success" role="status">{{hostedLoginVerifiedNotice}}</p>
+        {{/if}}
+        {{#if hostedLoginResetNotice}}
+        <p class="hosted-form-success" role="status">{{hostedLoginResetNotice}}</p>
         {{/if}}
         {{#if hostedLoginError}}
         <p class="hosted-form-error" role="alert">{{hostedLoginError}}</p>
@@ -88,6 +92,9 @@
           {{/if}}
           <button type="submit" class="hosted-submit">{{hostedTranslations.hosted_login_submit}}</button>
         </form>
+        <p class="hosted-account-alt">
+          <a href="forgot">{{hostedTranslations.hosted_login_forgot_link}}</a>
+        </p>
         <p class="hosted-account-alt">
           <a href="register">{{hostedTranslations.hosted_login_register_link}}</a>
         </p>

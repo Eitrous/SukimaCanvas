@@ -1,7 +1,5 @@
-import * as fs from "node:fs/promises";
-import path from "node:path";
 import { expect, test } from "../fixtures/test";
-import type { TestServer } from "../helpers/testServer";
+import { readAccountEmailLink } from "../helpers/hostedOutbox";
 
 test.use({
   serverOptions: {
@@ -10,33 +8,6 @@ test.use({
 });
 
 test.describe("hosted account lifecycle", () => {
-  function outboxDir(server: TestServer): string {
-    return path.join(server.dataPath, "hosted-data", "mail-outbox");
-  }
-
-  async function readVerificationLink(
-    server: TestServer,
-    recipient: string,
-  ): Promise<string> {
-    let link: string | undefined;
-    await expect
-      .poll(async () => {
-        const files = (await fs.readdir(outboxDir(server))).sort();
-        for (const file of files) {
-          const message = JSON.parse(
-            await fs.readFile(path.join(outboxDir(server), file), "utf8"),
-          );
-          if (message.to === recipient) {
-            const match = /https?:\/\/\S+/.exec(message.body);
-            if (match) link = match[0];
-          }
-        }
-        return link ?? "";
-      })
-      .not.toBe("");
-    return link as string;
-  }
-
   test("register, verify, log in, and log out in the browser", async ({
     page,
     server,
@@ -60,7 +31,7 @@ test.describe("hosted account lifecycle", () => {
     await expect(page.locator(".hosted-account-note")).toContainText(email);
 
     // The verification link arrives in the durable mail outbox.
-    const verifyLink = await readVerificationLink(server, email);
+    const verifyLink = await readAccountEmailLink(server, email, "verify");
     await page.goto(verifyLink);
     await expect(page).toHaveURL(/\/login\?verified=1$/);
     await expect(

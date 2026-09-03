@@ -68,21 +68,32 @@ branch or the local working tree.
 
 In hosted mode, accounts live under
 [hosted_event/accounts/](./server/hosted_event/accounts/): `store.mjs` owns the
-durable account/session/verification-token state (verification tokens and
-session ids are persisted only as SHA-256 digests), `passwords.mjs` owns scrypt
+durable account/session/verification-token/password-reset-token state
+(verification tokens, reset tokens, and session ids are persisted only as
+SHA-256 digests; sessions additionally carry a stable 10-hex public id that
+the account page uses to list and revoke sessions), `passwords.mjs` owns scrypt
 hashing, `emails.mjs` owns normalization and validation, `routes.mjs` owns the
-`/register`, `/verify`, `/login`, and `/logout` flows, and `captcha.mjs` exposes
-the configurable CAPTCHA contract backed by the shared `TURNSTILE_*`
-configuration. Raw hosted page templates are never served statically; their
-routes own them, and legacy mode 404s all account routes. Verification mail is
-queued as JSON files in `WBO_HOSTED_MAIL_OUTBOX_DIR` (default
+`/register`, `/verify`, `/login`, `/logout`, `/forgot`, `/reset`, and
+`/account` flows, and `captcha.mjs` exposes the configurable CAPTCHA contract
+backed by the shared `TURNSTILE_*` configuration. Password resets and password
+changes revoke sessions (resets revoke all of the account's sessions, changes
+keep the current device's); account disabling and explicit global revocation
+invalidate every session. CSRF tokens rotate on login and logout, so tokens
+rendered before a session transition are deterministically rejected. Raw
+hosted page templates are never served statically; their routes own them, and
+legacy mode 404s all account routes. Verification and recovery mail is queued
+as JSON files in `WBO_HOSTED_MAIL_OUTBOX_DIR` (default
 `<WBO_HOSTED_DATA_DIR>/mail-outbox`) until a mail vendor is selected. Account
 responses, logs, and emails must never carry passwords, password hashes, or
-verification tokens; hosted pages are session-aware and therefore `no-store`.
-Hosted account limits and timeouts are configured with `WBO_HOSTED_DATA_DIR`,
-`WBO_HOSTED_SESSION_MAX_AGE_MS`, `WBO_HOSTED_SESSION_IDLE_TIMEOUT_MS`,
-`WBO_HOSTED_VERIFICATION_TOKEN_TTL_MS`, and the
-`WBO_HOSTED_REGISTER_ATTEMPTS_*` / `WBO_HOSTED_LOGIN_ATTEMPTS_*` pairs.
+verification tokens; hosted pages are session-aware and therefore `no-store`
+with `Referrer-Policy: no-referrer`. Hosted account limits and timeouts are
+configured with `WBO_HOSTED_DATA_DIR`, `WBO_HOSTED_SESSION_MAX_AGE_MS`,
+`WBO_HOSTED_SESSION_IDLE_TIMEOUT_MS`, `WBO_HOSTED_VERIFICATION_TOKEN_TTL_MS`,
+`WBO_HOSTED_PASSWORD_RESET_TTL_MS`, and the `WBO_HOSTED_REGISTER_ATTEMPTS_*` /
+`WBO_HOSTED_LOGIN_ATTEMPTS_*` / `WBO_HOSTED_FORGOT_ATTEMPTS_*` pairs. The
+`HOSTED_CLOCK` config field is an injectable clock adapter for isolated tests
+(never read from the environment); integration tests drive expiry and
+revocation through it instead of sleeping.
 
 Every HTTP request passes through [dispatch.mjs](./server/http/dispatch.mjs),
 where URL validation, route matching, route-level access checks, request

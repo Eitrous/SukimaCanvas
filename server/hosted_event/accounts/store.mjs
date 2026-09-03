@@ -10,6 +10,14 @@ const { logger } = observability;
 const STORE_FORMAT_VERSION = 1;
 const MAX_SESSIONS_PER_ACCOUNT = 50;
 const SESSION_TOUCH_INTERVAL_MS = 60_000;
+const PUBLIC_ID_PATTERN = /^[0-9a-f]{10}$/;
+
+/**
+ * @returns {string}
+ */
+function randomPublicId() {
+  return crypto.randomBytes(5).toString("hex");
+}
 
 /**
  * @typedef {{
@@ -25,16 +33,118 @@ const SESSION_TOUCH_INTERVAL_MS = 60_000;
  * @typedef {{
  *   accountId: string,
  *   expiresAtMs: number,
- * }} StoredVerificationToken
+ * }} StoredSingleUseToken
  */
 /**
  * @typedef {{
  *   accountId: string,
+ *   publicId: string,
  *   createdAtMs: number,
  *   lastSeenAtMs: number,
  *   expiresAtMs: number,
  * }} StoredSession
  */
+/**
+ * Single-use digest-token table shared by email verification and password
+ * reset: at most one outstanding token per account, replace-on-issue,
+ * consume-on-redemption, server-clock expiry. Only digests are ever stored.
+ *
+ * @param {{
+ *   ttlMs: number,
+ *   digest: (rawToken: string) => string,
+ *   randomToken: () => string,
+ *   clock: () => number,
+ * }} options
+ */
+function createSingleUseTokenTable(options) {
+  const { ttlMs, digest, randomToken, clock } = options;
+  /** @type {Map<string, StoredSingleUseToken>} */
+  const tokensByDigest = new Map();
+  /** @type {Map<string, string>} */
+  const digestsByAccountId = new Map();
+
+  /**
+   * @param {string} tokenDigest
+   * @param {string} accountId
+   * @returns {void}
+   */
+  function forget(tokenDigest, accountId) {
+    tokensByDigest.delete(tokenDigest);
+    if (digestsByAccountId.get(accountId) === tokenDigest) {
+      digestsByAccountId.delete(accountId);
+    }
+  }
+
+  return {
+    /**
+     * @param {string} accountId
+     * @returns {string}
+     */
+    issue(accountId) {
+      const previousDigest = digestsByAccountId.get(accountId);
+      if (previousDigest !== undefined) forget(previousDigest, accountId);
+      const rawToken = randomToken();
+      const tokenDigest = digest(rawToken);
+      tokensByDigest.set(tokenDigest, {
+        accountId,
+        expiresAtMs: clock() + ttlMs,
+      });
+      digestsByAccountId.set(accountId, tokenDigest);
+      return rawToken;
+    },
+
+    /**
+     * @param {string} rawToken
+     * @returns {string | null}
+     */
+    consume(rawToken) {
+      if (typeof rawToken !== "string" || rawToken.length === 0) return null;
+      const tokenDigest = digest(rawToken);
+      const token = tokensByDigest.get(tokenDigest);
+      if (!token) return null;
+      forget(tokenDigest, token.accountId);
+      return token.expiresAtMs <= clock() ? null : token.accountId;
+    },
+
+    /**
+     * @param {string} rawToken
+     * @returns {string | null}
+     */
+    peek(rawToken) {
+      if (typeof rawToken !== "string" || rawToken.length === 0) return null;
+      const token = tokensByDigest.get(digest(rawToken));
+      if (!token) return null;
+      return token.expiresAtMs <= clock() ? null : token.accountId;
+    },
+
+    /**
+     * @param {number} now
+     * @returns {void}
+     */
+    prune(now) {
+      for (const [tokenDigest, token] of tokensByDigest) {
+        if (token.expiresAtMs <= now) forget(tokenDigest, token.accountId);
+      }
+    },
+
+    /**
+     * @param {string} tokenDigest
+     * @param {StoredSingleUseToken} token
+     * @returns {void}
+     */
+    adopt(tokenDigest, token) {
+      tokensByDigest.set(tokenDigest, token);
+      digestsByAccountId.set(token.accountId, tokenDigest);
+    },
+
+    /**
+     * @returns {Map<string, StoredSingleUseToken>}
+     */
+    tokens() {
+      return tokensByDigest;
+    },
+  };
+}
 
 /**
  * Durable account storage for the Hosted Event Service.
@@ -53,6 +163,7 @@ const SESSION_TOUCH_INTERVAL_MS = 60_000;
  *   sessionMaxAgeMs?: number,
  *   sessionIdleMs?: number,
  *   verificationTokenTtlMs?: number,
+ *   passwordResetTtlMs?: number,
  *   randomToken?: () => string,
  * }} options
  */
@@ -68,6 +179,10 @@ function createFileAccountStore(options) {
     options.verificationTokenTtlMs,
     24 * 60 * 60 * 1000,
   );
+  const passwordResetTtlMs = positiveOr(
+    options.passwordResetTtlMs,
+    60 * 60 * 1000,
+  );
   const randomToken =
     options.randomToken || (() => crypto.randomBytes(32).toString("base64url"));
 
@@ -75,17 +190,14 @@ function createFileAccountStore(options) {
   const accountsById = new Map();
   /** @type {Map<string, string>} */
   const accountIdsByEmail = new Map();
-  /** @type {Map<string, StoredVerificationToken>} */
-  const verificationTokensByDigest = new Map();
   /** @type {Map<string, StoredSession>} */
   const sessionsByDigest = new Map();
-  /** @type {Map<string, string>} */
-  const tokenDigestsByAccountId = new Map();
   let loaded = false;
   let writeQueue = Promise.resolve();
 
   const ACCOUNTS_FILE = path.join(dataDir, "accounts.json");
   const VERIFICATIONS_FILE = path.join(dataDir, "verifications.json");
+  const RESETS_FILE = path.join(dataDir, "resets.json");
   const SESSIONS_FILE = path.join(dataDir, "sessions.json");
 
   function ensureLoaded() {
@@ -103,11 +215,19 @@ function createFileAccountStore(options) {
     for (const [
       digestValue,
       token,
-    ] of /** @type {[string, StoredVerificationToken][]} */ (
+    ] of /** @type {[string, StoredSingleUseToken][]} */ (
       Object.entries(verifications.tokens || {})
     )) {
-      verificationTokensByDigest.set(digestValue, token);
-      tokenDigestsByAccountId.set(token.accountId, digestValue);
+      verificationTokens.adopt(digestValue, token);
+    }
+    const resets = readStoreFile(RESETS_FILE, { tokens: {} });
+    for (const [
+      digestValue,
+      token,
+    ] of /** @type {[string, StoredSingleUseToken][]} */ (
+      Object.entries(resets.tokens || {})
+    )) {
+      resetTokens.adopt(digestValue, token);
     }
     const sessions = readStoreFile(SESSIONS_FILE, { sessions: {} });
     for (const [
@@ -116,6 +236,10 @@ function createFileAccountStore(options) {
     ] of /** @type {[string, StoredSession][]} */ (
       Object.entries(sessions.sessions || {})
     )) {
+      // Sessions written before public ids existed get one backfilled.
+      if (typeof session.publicId !== "string") {
+        session.publicId = randomPublicId();
+      }
       sessionsByDigest.set(digestValue, session);
     }
   }
@@ -174,14 +298,8 @@ function createFileAccountStore(options) {
    */
   async function persistNow() {
     const now = clock();
-    for (const [tokenDigest, token] of verificationTokensByDigest) {
-      if (token.expiresAtMs <= now) {
-        verificationTokensByDigest.delete(tokenDigest);
-        if (tokenDigestsByAccountId.get(token.accountId) === tokenDigest) {
-          tokenDigestsByAccountId.delete(token.accountId);
-        }
-      }
-    }
+    verificationTokens.prune(now);
+    resetTokens.prune(now);
     for (const [sessionDigest, session] of sessionsByDigest) {
       if (session.expiresAtMs <= now) sessionsByDigest.delete(sessionDigest);
     }
@@ -192,7 +310,11 @@ function createFileAccountStore(options) {
     });
     await writeStoreFile(VERIFICATIONS_FILE, {
       version: STORE_FORMAT_VERSION,
-      tokens: Object.fromEntries(verificationTokensByDigest),
+      tokens: Object.fromEntries(verificationTokens.tokens()),
+    });
+    await writeStoreFile(RESETS_FILE, {
+      version: STORE_FORMAT_VERSION,
+      tokens: Object.fromEntries(resetTokens.tokens()),
     });
     await writeStoreFile(SESSIONS_FILE, {
       version: STORE_FORMAT_VERSION,
@@ -220,6 +342,19 @@ function createFileAccountStore(options) {
   function digest(rawToken) {
     return crypto.createHash("sha256").update(rawToken, "utf8").digest("hex");
   }
+
+  const verificationTokens = createSingleUseTokenTable({
+    ttlMs: verificationTokenTtlMs,
+    digest,
+    randomToken,
+    clock,
+  });
+  const resetTokens = createSingleUseTokenTable({
+    ttlMs: passwordResetTtlMs,
+    digest,
+    randomToken,
+    clock,
+  });
 
   /**
    * @param {{email: string, passwordHash: string}} input
@@ -307,18 +442,7 @@ function createFileAccountStore(options) {
     if (!accountsById.has(accountId)) {
       throw new Error(`unknown account: ${accountId}`);
     }
-    const previousDigest = tokenDigestsByAccountId.get(accountId);
-    if (previousDigest !== undefined) {
-      verificationTokensByDigest.delete(previousDigest);
-      tokenDigestsByAccountId.delete(accountId);
-    }
-    const rawToken = randomToken();
-    const tokenDigest = digest(rawToken);
-    verificationTokensByDigest.set(tokenDigest, {
-      accountId,
-      expiresAtMs: clock() + verificationTokenTtlMs,
-    });
-    tokenDigestsByAccountId.set(accountId, tokenDigest);
+    const rawToken = verificationTokens.issue(accountId);
     await enqueueWrite(persistNow);
     return rawToken;
   }
@@ -329,17 +453,48 @@ function createFileAccountStore(options) {
    */
   async function consumeVerificationToken(rawToken) {
     ensureLoaded();
-    if (typeof rawToken !== "string" || rawToken.length === 0) return null;
-    const tokenDigest = digest(rawToken);
-    const token = verificationTokensByDigest.get(tokenDigest);
-    if (!token) return null;
-    verificationTokensByDigest.delete(tokenDigest);
-    if (tokenDigestsByAccountId.get(token.accountId) === tokenDigest) {
-      tokenDigestsByAccountId.delete(token.accountId);
+    const accountId = verificationTokens.consume(rawToken);
+    if (accountId) await enqueueWrite(persistNow);
+    return accountId;
+  }
+
+  /**
+   * Issues a new single-use password reset token, replacing any outstanding
+   * one so only the newest email link works.
+   *
+   * @param {string} accountId
+   * @returns {Promise<string>}
+   */
+  async function createPasswordResetToken(accountId) {
+    ensureLoaded();
+    if (!accountsById.has(accountId)) {
+      throw new Error(`unknown account: ${accountId}`);
     }
+    const rawToken = resetTokens.issue(accountId);
     await enqueueWrite(persistNow);
-    if (token.expiresAtMs <= clock()) return null;
-    return token.accountId;
+    return rawToken;
+  }
+
+  /**
+   * @param {string} rawToken
+   * @returns {Promise<string | null>}
+   */
+  async function consumePasswordResetToken(rawToken) {
+    ensureLoaded();
+    const accountId = resetTokens.consume(rawToken);
+    if (accountId) await enqueueWrite(persistNow);
+    return accountId;
+  }
+
+  /**
+   * Non-consuming validity check used when rendering the reset form.
+   *
+   * @param {string} rawToken
+   * @returns {string | null}
+   */
+  function peekPasswordResetToken(rawToken) {
+    ensureLoaded();
+    return resetTokens.peek(rawToken);
   }
 
   /**
@@ -362,6 +517,7 @@ function createFileAccountStore(options) {
     const rawSessionId = randomToken();
     sessionsByDigest.set(digest(rawSessionId), {
       accountId,
+      publicId: randomPublicId(),
       createdAtMs: now,
       lastSeenAtMs: now,
       expiresAtMs: now + sessionMaxAgeMs,
@@ -376,7 +532,7 @@ function createFileAccountStore(options) {
    *
    * @param {string} sessionDigest
    * @param {StoredSession} session
-   * @returns {{accountId: string} | null}
+   * @returns {{accountId: string, publicId: string} | null}
    */
   function validateSession(sessionDigest, session) {
     const now = clock();
@@ -392,12 +548,12 @@ function createFileAccountStore(options) {
       session.lastSeenAtMs = now;
       enqueueWrite(persistNow);
     }
-    return { accountId: session.accountId };
+    return { accountId: session.accountId, publicId: session.publicId };
   }
 
   /**
    * @param {string} rawSessionId
-   * @returns {Promise<{accountId: string} | null>}
+   * @returns {Promise<{accountId: string, publicId: string} | null>}
    */
   async function resolveSession(rawSessionId) {
     ensureLoaded();
@@ -416,7 +572,7 @@ function createFileAccountStore(options) {
    * render on disk.
    *
    * @param {string} rawSessionId
-   * @returns {{accountId: string} | null}
+   * @returns {{accountId: string, publicId: string} | null}
    */
   function peekSession(rawSessionId) {
     ensureLoaded();
@@ -462,8 +618,90 @@ function createFileAccountStore(options) {
   }
 
   /**
-   * Replaces the password hash of an existing account. Only used while an
-   * account is still unverified and its registration is repeated.
+   * Lists the account's active sessions, most recently active first, with
+   * only the stable public id and timestamps; never digests or raw tokens.
+   *
+   * @param {string} accountId
+   * @returns {Promise<{publicId: string, createdAtMs: number, lastSeenAtMs: number}[]>}
+   */
+  async function listSessions(accountId) {
+    ensureLoaded();
+    const now = clock();
+    return [...sessionsByDigest.values()]
+      .filter(
+        (session) =>
+          session.accountId === accountId &&
+          session.expiresAtMs > now &&
+          now - session.lastSeenAtMs <= sessionIdleMs,
+      )
+      .sort((left, right) => right.lastSeenAtMs - left.lastSeenAtMs)
+      .map((session) => ({
+        publicId: session.publicId,
+        createdAtMs: session.createdAtMs,
+        lastSeenAtMs: session.lastSeenAtMs,
+      }));
+  }
+
+  /**
+   * Revokes the one session of the account matching the public id.
+   *
+   * @param {string} accountId
+   * @param {string} publicId
+   * @returns {Promise<boolean>}
+   */
+  async function revokeSessionByPublicId(accountId, publicId) {
+    ensureLoaded();
+    if (typeof publicId !== "string" || !PUBLIC_ID_PATTERN.test(publicId)) {
+      return false;
+    }
+    for (const [sessionDigest, session] of sessionsByDigest) {
+      if (session.accountId === accountId && session.publicId === publicId) {
+        sessionsByDigest.delete(sessionDigest);
+        await enqueueWrite(persistNow);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Revokes every session of the account except the one to keep (the raw
+   * session id of the current browser), returning how many were revoked.
+   *
+   * @param {string} accountId
+   * @param {string} rawSessionIdToKeep
+   * @returns {Promise<number>}
+   */
+  async function revokeOtherSessions(accountId, rawSessionIdToKeep) {
+    ensureLoaded();
+    const keepDigest = digest(rawSessionIdToKeep);
+    let revoked = 0;
+    for (const [sessionDigest, session] of sessionsByDigest) {
+      if (session.accountId !== accountId) continue;
+      if (sessionDigest === keepDigest) continue;
+      sessionsByDigest.delete(sessionDigest);
+      revoked += 1;
+    }
+    if (revoked > 0) await enqueueWrite(persistNow);
+    return revoked;
+  }
+
+  /**
+   * Explicit global revocation: invalidates every session in the store.
+   *
+   * @returns {Promise<number>}
+   */
+  async function revokeAllSessions() {
+    ensureLoaded();
+    const revoked = sessionsByDigest.size;
+    sessionsByDigest.clear();
+    if (revoked > 0) await enqueueWrite(persistNow);
+    return revoked;
+  }
+
+  /**
+   * Replaces the password hash of an existing account. Used by repeated
+   * registrations of unverified accounts and by password resets and changes.
    *
    * @param {string} accountId
    * @param {string} passwordHash
@@ -496,9 +734,17 @@ function createFileAccountStore(options) {
     updateAccountPassword,
     createVerificationToken,
     consumeVerificationToken,
+    createPasswordResetToken,
+    peekPasswordResetToken,
+    consumePasswordResetToken,
     createSession,
     resolveSession,
     peekSession,
+    listSessions,
+    revokeAccountSessions,
+    revokeSessionByPublicId,
+    revokeOtherSessions,
+    revokeAllSessions,
     revokeSession,
     flush,
   };

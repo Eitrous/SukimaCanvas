@@ -92,17 +92,20 @@ The `/source` page identifies the exact deployment source when
 configured; without that verifiable mapping it returns a clear unavailable
 response.
 
-Hosted mode also serves account pages at `/register`, `/verify`, `/login`, and
-`/logout`. Registration requires an email address, a password (8-128
-characters), and confirmation of being at least 18 years old; it completes
-through a single-use email verification link. Login issues a server-side
-session (30 days maximum, 12 hours idle) in an `HttpOnly`, `SameSite=Lax`
-cookie that is also `Secure` outside development. Verification messages are
-queued as JSON files under `WBO_HOSTED_MAIL_OUTBOX_DIR` (by default
-`<WBO_HOSTED_DATA_DIR>/mail-outbox`), where account state lives as well; set
-`TURNSTILE_SECRET_KEY` and `TURNSTILE_SITE_KEY` to require CAPTCHA on
-registration and login. Registration and login are additionally rate limited
-per IP and per email address.
+Hosted mode also serves account pages at `/register`, `/verify`, `/login`,
+`/logout`, `/forgot`, `/reset`, and `/account`. Registration requires an email
+address, a password (8-128 characters), and confirmation of being at least 18
+years old; it completes through a single-use email verification link. Login
+issues a server-side session (30 days maximum, 12 hours idle) in an
+`HttpOnly`, `SameSite=Lax` cookie that is also `Secure` outside development.
+`/account` lists active sessions, revokes individual devices or all other
+devices, and changes the password (which signs other devices out); password
+resets through `/forgot` and `/reset` sign every device out. Verification and
+recovery messages are queued as JSON files under `WBO_HOSTED_MAIL_OUTBOX_DIR`
+(by default `<WBO_HOSTED_DATA_DIR>/mail-outbox`), where account state lives as
+well; set `TURNSTILE_SECRET_KEY` and `TURNSTILE_SITE_KEY` to require CAPTCHA
+on registration and login. Registration, login, and password-reset requests
+are additionally rate limited per IP and per email address.
 
 ## Translations
 

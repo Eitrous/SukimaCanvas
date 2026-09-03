@@ -36,6 +36,12 @@ export type HostedEventModule = {
   serveLogin: HttpRouteHandler;
   serveVerify: HttpRouteHandler;
   serveLogout: HttpRouteHandler;
+  serveForgot: HttpRouteHandler;
+  serveReset: HttpRouteHandler;
+  serveAccount: HttpRouteHandler;
+  serveAccountPassword: HttpRouteHandler;
+  serveAccountSessionRevoke: HttpRouteHandler;
+  serveAccountSessionsRevokeOthers: HttpRouteHandler;
 };
 
 export type ObservedHttpRequest = {

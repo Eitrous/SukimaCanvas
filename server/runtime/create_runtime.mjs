@@ -23,6 +23,9 @@ const HOSTED_TEMPLATE_PATHS = new Set([
   "/login.html",
   "/verify.html",
   "/logout.html",
+  "/forgot.html",
+  "/reset.html",
+  "/account.html",
 ]);
 
 /** @import { HttpResponse, ServerConfig, ServerRuntime } from "../../types/server-runtime.d.ts" */
@@ -203,6 +206,18 @@ function createServerRuntime(config) {
     logoutTemplatePath: configuredTemplatePathWithBundledFallback(
       config,
       "logout.html",
+    ),
+    forgotTemplatePath: configuredTemplatePathWithBundledFallback(
+      config,
+      "forgot.html",
+    ),
+    resetTemplatePath: configuredTemplatePathWithBundledFallback(
+      config,
+      "reset.html",
+    ),
+    accountTemplatePath: configuredTemplatePathWithBundledFallback(
+      config,
+      "account.html",
     ),
     htmlHeadSnippet,
   });

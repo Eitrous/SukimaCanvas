@@ -8,130 +8,16 @@ const http = require("node:http");
 const { closeServer, createConfig, request } = require("./test_helpers.js");
 const { createServerApp } = require("../server/server.mjs");
 
-const CLIENT_WEBROOT = path.join(__dirname, "..", "client-data");
-const STRONG_PASSWORD = "correct horse battery staple";
-const MAX_FORM_BODY_BYTES = 32 * 1024;
-
-/**
- * @param {{[key: string]: any}} [overrides]
- * @returns {Promise<{app: import("http").Server, root: string, outboxDir: string}>}
- */
-async function createHostedServer(overrides = {}) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "wbo-hosted-accounts-"));
-  const historyDir = path.join(root, "history");
-  await fs.mkdir(historyDir);
-  const app = await createServerApp(
-    createConfig({
-      HOST: "127.0.0.1",
-      PORT: 0,
-      HISTORY_DIR: historyDir,
-      WEBROOT: CLIENT_WEBROOT,
-      HOSTED_MODE: true,
-      HOSTED_DATA_DIR: path.join(root, "hosted-data"),
-      ...overrides,
-    }),
-    {
-      logStarted: false,
-      socketsModule: {
-        async start() {},
-        async shutdown() {},
-      },
-    },
-  );
-  return {
-    app,
-    root,
-    outboxDir: path.join(root, "hosted-data", "mail-outbox"),
-  };
-}
-
-/**
- * @param {import("http").Server} app
- * @param {string} requestPath
- * @param {{method?: string, body?: string, headers?: {[key: string]: string}, cookie?: string}} [options]
- * @returns {Promise<{statusCode: number, headers: import("http").IncomingHttpHeaders, body: string, setCookie: string[]}>}
- */
-function requestWithCookies(app, requestPath, options = {}) {
-  return new Promise((resolve, reject) => {
-    const address = app.address();
-    if (!address || typeof address === "string") {
-      reject(new Error("server is not listening on a TCP port"));
-      return;
-    }
-    const req = http.request(
-      {
-        host: "127.0.0.1",
-        port: address.port,
-        path: requestPath,
-        method: options.method || "GET",
-        agent: false,
-        headers: {
-          ...(options.body
-            ? {
-                "content-type": "application/x-www-form-urlencoded",
-                "content-length": Buffer.byteLength(options.body),
-              }
-            : {}),
-          ...(options.cookie ? { cookie: options.cookie } : {}),
-          ...(options.headers || {}),
-        },
-      },
-      (response) => {
-        /** @type {string[]} */
-        const chunks = [];
-        response.setEncoding("utf8");
-        response.on("data", (chunk) => chunks.push(chunk));
-        response.on("end", () =>
-          resolve({
-            statusCode: response.statusCode || 0,
-            headers: response.headers,
-            body: chunks.join(""),
-            setCookie: response.headers["set-cookie"] || [],
-          }),
-        );
-      },
-    );
-    req.on("error", reject);
-    if (options.body) req.write(options.body);
-    req.end();
-  });
-}
-
-/**
- * @param {string} body
- * @param {string} name
- * @returns {string}
- */
-function formValue(body, name) {
-  const match = new RegExp(`name="${name}"[^>]*value="([^"]*)"`).exec(body);
-  return match ? match[1] || "" : "";
-}
-
-/**
- * @param {string[]} setCookie
- * @param {string} name
- * @returns {string}
- */
-function cookiePair(setCookie, name) {
-  const cookie = setCookie.find((candidate) =>
-    candidate.startsWith(`${name}=`),
-  );
-  assert.ok(cookie, `expected a ${name} cookie`);
-  return cookie.split(";")[0] || "";
-}
-
-/**
- * @param {string[]} setCookie
- * @param {string} name
- * @returns {string}
- */
-function cookieAttributes(setCookie, name) {
-  const cookie = setCookie.find((candidate) =>
-    candidate.startsWith(`${name}=`),
-  );
-  assert.ok(cookie, `expected a ${name} cookie`);
-  return cookie;
-}
+const {
+  CLIENT_WEBROOT,
+  STRONG_PASSWORD,
+  MAX_FORM_BODY_BYTES,
+  createHostedServer,
+  requestWithCookies,
+  formValue,
+  cookiePair,
+  cookieAttributes,
+} = require("./helpers/hosted_http.js");
 
 /**
  * Reads the newest verification message from the outbox.
