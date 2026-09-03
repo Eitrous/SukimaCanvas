@@ -7,7 +7,7 @@ import { serveError } from "../http/observation.mjs";
  * concept, so each route rejects with a deterministic 404 instead of falling
  * through to static file resolution.
  *
- * @param {keyof Pick<HostedEventModule, "serveRegister" | "serveLogin" | "serveVerify" | "serveLogout" | "serveForgot" | "serveReset" | "serveAccount" | "serveAccountPassword" | "serveAccountSessionRevoke" | "serveAccountSessionsRevokeOthers" | "serveOrganizerApply" | "serveOperatorConsole" | "serveOperatorApplication" | "serveOperatorApproveApplication" | "serveOperatorRejectApplication">} handlerName
+ * @param {keyof Pick<HostedEventModule, "serveRegister" | "serveLogin" | "serveVerify" | "serveLogout" | "serveForgot" | "serveReset" | "serveAccount" | "serveAccountPassword" | "serveAccountSessionRevoke" | "serveAccountSessionsRevokeOthers" | "serveOrganizerApply" | "serveOperatorConsole" | "serveOperatorApplication" | "serveOperatorApproveApplication" | "serveOperatorRejectApplication" | "serveOrganizerConsole" | "serveOrganizerInvitationAccept" | "serveOrganizerInvitationDecline" | "serveOrganizerManage" | "serveOrganizerInvite" | "serveOrganizerInvitationRevoke" | "serveOrganizerMemberRole" | "serveOrganizerMemberRemove">} handlerName
  * @returns {import("../../types/server-runtime.d.ts").HttpRouteHandler}
  */
 function serveHostedAccountPage(handlerName) {
@@ -56,4 +56,28 @@ export const serveOperatorApproveApplication = serveHostedAccountPage(
 );
 export const serveOperatorRejectApplication = serveHostedAccountPage(
   "serveOperatorRejectApplication",
+);
+export const serveOrganizerConsole = serveHostedAccountPage(
+  "serveOrganizerConsole",
+);
+export const serveOrganizerInvitationAccept = serveHostedAccountPage(
+  "serveOrganizerInvitationAccept",
+);
+export const serveOrganizerInvitationDecline = serveHostedAccountPage(
+  "serveOrganizerInvitationDecline",
+);
+export const serveOrganizerManage = serveHostedAccountPage(
+  "serveOrganizerManage",
+);
+export const serveOrganizerInvite = serveHostedAccountPage(
+  "serveOrganizerInvite",
+);
+export const serveOrganizerInvitationRevoke = serveHostedAccountPage(
+  "serveOrganizerInvitationRevoke",
+);
+export const serveOrganizerMemberRole = serveHostedAccountPage(
+  "serveOrganizerMemberRole",
+);
+export const serveOrganizerMemberRemove = serveHostedAccountPage(
+  "serveOrganizerMemberRemove",
 );

@@ -114,6 +114,8 @@ class HostedPageTemplate extends Template {
  *   organizerApplyTemplatePath: string,
  *   operatorTemplatePath: string,
  *   operatorApplicationTemplatePath: string,
+ *   organizerConsoleTemplatePath: string,
+ *   organizerManageTemplatePath: string,
  *   htmlHeadSnippet?: string,
  * }} paths
  * @returns {import("../../types/server-runtime.d.ts").HostedEventModule}
@@ -237,6 +239,16 @@ function createHostedEventModule(config, paths) {
       ),
       operatorApplication: new HostedPageTemplate(
         paths.operatorApplicationTemplatePath,
+        config,
+        templateOptions,
+      ),
+      organizerConsole: new HostedPageTemplate(
+        paths.organizerConsoleTemplatePath,
+        config,
+        templateOptions,
+      ),
+      organizerManage: new HostedPageTemplate(
+        paths.organizerManageTemplatePath,
         config,
         templateOptions,
       ),

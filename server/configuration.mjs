@@ -152,6 +152,18 @@ export const HOSTED_ORGANIZER_APPLY_ATTEMPTS_WINDOW_MS = parseIntegerEnv(
   15 * 60 * 1000,
 );
 
+/** Maximum organizer-invitation sends per owner account or IP within the window. */
+export const HOSTED_ORGANIZER_INVITE_ATTEMPTS_LIMIT = parseIntegerEnv(
+  "WBO_HOSTED_ORGANIZER_INVITE_ATTEMPTS_LIMIT",
+  30,
+);
+
+/** Window for hosted organizer-invitation attempt limits. */
+export const HOSTED_ORGANIZER_INVITE_ATTEMPTS_WINDOW_MS = parseIntegerEnv(
+  "WBO_HOSTED_ORGANIZER_INVITE_ATTEMPTS_WINDOW_MS",
+  15 * 60 * 1000,
+);
+
 /** Immutable version identifier shown by the Corresponding Source page. */
 export const DEPLOYMENT_VERSION = parseStringEnv(
   "WBO_DEPLOYMENT_VERSION",

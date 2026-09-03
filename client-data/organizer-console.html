@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="{{hostedLanguage}}" dir="{{hostedDirection}}">
+  <head>
+    <meta charset="utf-8" />
+    <title>{{hostedTranslations.hosted_organizer_console_title}}</title>
+    <base href="{{baseHref}}" />
+    <link rel="stylesheet" href="hosted.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/x-icon" sizes="16x16" href="favicon.ico" />
+    <link rel="apple-touch-icon" href="favicon.svg" />
+    <link rel="canonical" href="{{hostedCanonicalUrl}}" />
+    {{#hostedLanguageLinks}}
+    <link rel="alternate" hreflang="{{language}}" href="{{href}}" />
+    {{/hostedLanguageLinks}}
+    {{{htmlHeadSnippet}}}
+  </head>
+  <body class="hosted-shell">
+    <header class="hosted-header">
+      <a class="hosted-brand" href=".">SukimaCanvas</a>
+      <nav aria-label="{{hostedTranslations.hosted_language_label}}">
+        {{#if hostedAccount}}
+        <span class="hosted-account-email">{{hostedAccount.email}}</span>
+        <a href="account">{{hostedTranslations.hosted_nav_account}}</a>
+        <a href="organizer">{{hostedTranslations.hosted_nav_organizer}}</a>
+        {{#if hostedAccount.isOperator}}
+        <a href="operator">{{hostedTranslations.hosted_nav_operator}}</a>
+        {{/if}}
+        <a href="logout">{{hostedTranslations.hosted_nav_logout}}</a>
+        {{else}}
+        <a href="login">{{hostedTranslations.hosted_nav_login}}</a>
+        <a href="register">{{hostedTranslations.hosted_nav_register}}</a>
+        {{/if}}
+        <a href="source">{{hostedTranslations.hosted_source_link}}</a>
+        <details class="hosted-language-picker">
+          <summary>{{hostedLanguage}}</summary>
+          <ul>
+            {{#hostedLanguageLinks}}
+            <li><a href="{{href}}" hreflang="{{language}}">{{language}}</a></li>
+            {{/hostedLanguageLinks}}
+          </ul>
+        </details>
+      </nav>
+    </header>
+
+    <main class="hosted-main hosted-account-main">
+      <section class="hosted-account-card" aria-labelledby="hosted-organizer-console-title">
+        <h1 id="hosted-organizer-console-title">{{hostedTranslations.hosted_organizer_console_title}}</h1>
+        <p class="hosted-account-intro">{{hostedTranslations.hosted_organizer_console_intro}}</p>
+
+        {{#if hostedOrganizerConsoleError}}
+        <p class="hosted-form-error" role="alert">{{hostedOrganizerConsoleError}}</p>
+        {{/if}}
+
+        {{#if hostedOrganizerHasInvitations}}
+        <h2 class="hosted-account-section-title">{{hostedTranslations.hosted_organizer_invitations_title}}</h2>
+        <ul class="hosted-organizer-queue">
+          {{#hostedOrganizerInvitations}}
+          <li class="hosted-organizer-queue-item">
+            <div class="hosted-organizer-queue-meta">
+              <span class="hosted-organizer-queue-name">{{organizerName}}</span>
+              <span>{{roleLabel}}</span>
+            </div>
+            <div class="hosted-organizer-invitation-actions">
+              <form method="post" action="organizer/invitations/{{invitationId}}/accept">
+                <input type="hidden" name="_csrf" value="{{../csrfToken}}" />
+                <button type="submit" class="hosted-submit hosted-submit-small">{{../hostedTranslations.hosted_organizer_invitation_accept}}</button>
+              </form>
+              <form method="post" action="organizer/invitations/{{invitationId}}/decline">
+                <input type="hidden" name="_csrf" value="{{../csrfToken}}" />
+                <button type="submit" class="hosted-submit hosted-submit-small">{{../hostedTranslations.hosted_organizer_invitation_decline}}</button>
+              </form>
+            </div>
+          </li>
+          {{/hostedOrganizerInvitations}}
+        </ul>
+        {{/if}}
+
+        <h2 class="hosted-account-section-title">{{hostedTranslations.hosted_organizer_memberships_title}}</h2>
+        {{#if hostedOrganizerHasMemberships}}
+        <ul class="hosted-organizer-queue">
+          {{#hostedOrganizerMemberships}}
+          <li class="hosted-organizer-queue-item">
+            <div class="hosted-organizer-queue-meta">
+              <span class="hosted-organizer-queue-name">{{name}}</span>
+              <span>{{roleLabel}}</span>
+            </div>
+            <a class="hosted-primary-link" href="organizers/{{organizerId}}">{{../hostedTranslations.hosted_organizer_manage_link}}</a>
+          </li>
+          {{/hostedOrganizerMemberships}}
+        </ul>
+        {{else}}
+        <p class="hosted-account-note">{{hostedTranslations.hosted_organizer_no_memberships}}</p>
+        {{/if}}
+
+        <p class="hosted-account-alt">
+          <a href="organizer/apply">{{hostedTranslations.hosted_nav_organizer_apply}}</a>
+        </p>
+      </section>
+    </main>
+
+    <footer class="hosted-footer">
+      <span>{{hostedTranslations.hosted_service_name}}</span>
+      <a href="source">{{hostedTranslations.hosted_source_link}}</a>
+    </footer>
+  </body>
+</html>

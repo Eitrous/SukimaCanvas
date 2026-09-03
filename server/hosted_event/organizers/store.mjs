@@ -7,6 +7,7 @@ import observability from "../../observability/index.mjs";
 const { logger } = observability;
 
 const STORE_FORMAT_VERSION = 1;
+const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** Application field bounds; the route validates first, the store clamps defensively. */
 const MAX_ORGANIZER_NAME_LENGTH = 120;
@@ -14,6 +15,8 @@ const MAX_CONTACT_NAME_LENGTH = 120;
 const MAX_CONTACT_EMAIL_LENGTH = 254;
 const MAX_DESCRIPTION_LENGTH = 2000;
 const MAX_OPERATOR_NOTE_LENGTH = 2000;
+
+/** @typedef {"owner" | "admin"} MemberRole */
 
 /**
  * @typedef {"pending" | "approved" | "rejected"} ApplicationStatus
@@ -46,9 +49,26 @@ const MAX_OPERATOR_NOTE_LENGTH = 2000;
  * @typedef {{
  *   organizerId: string,
  *   accountId: string,
- *   role: "owner" | "admin",
+ *   role: MemberRole,
  *   grantedAtMs: number,
  * }} StoredRole
+ */
+/**
+ * @typedef {"pending" | "accepted" | "revoked" | "declined"} InvitationStatus
+ */
+/**
+ * @typedef {{
+ *   invitationId: string,
+ *   organizerId: string,
+ *   email: string,
+ *   role: MemberRole,
+ *   status: InvitationStatus,
+ *   invitedByAccountId: string,
+ *   createdAtMs: number,
+ *   expiresAtMs: number,
+ *   acceptedByAccountId: string | null,
+ *   acceptedAtMs: number | null,
+ * }} StoredInvitation
  */
 /**
  * @typedef {{
@@ -78,12 +98,19 @@ const MAX_OPERATOR_NOTE_LENGTH = 2000;
  *   dataDir: string,
  *   clock?: () => number,
  *   randomId?: () => string,
+ *   invitationTtlMs?: number,
  * }} options
  */
 function createFileOrganizerStore(options) {
   const dataDir = options.dataDir;
   const clock = options.clock || (() => Date.now());
   const randomId = options.randomId || (() => crypto.randomUUID());
+  const invitationTtlMs =
+    typeof options.invitationTtlMs === "number" &&
+    Number.isFinite(options.invitationTtlMs) &&
+    options.invitationTtlMs > 0
+      ? options.invitationTtlMs
+      : INVITATION_TTL_MS;
 
   /** @type {Map<string, StoredApplication>} */
   const applicationsById = new Map();
@@ -93,6 +120,8 @@ function createFileOrganizerStore(options) {
   const organizersById = new Map();
   /** @type {Map<string, StoredRole>} */
   const rolesByKey = new Map();
+  /** @type {Map<string, StoredInvitation>} */
+  const invitationsById = new Map();
   /** @type {StoredAuditRecord[]} */
   const auditRecords = [];
   let loaded = false;
@@ -101,6 +130,7 @@ function createFileOrganizerStore(options) {
   const APPLICATIONS_FILE = path.join(dataDir, "organizer_applications.json");
   const ORGANIZERS_FILE = path.join(dataDir, "organizers.json");
   const ROLES_FILE = path.join(dataDir, "organizer_roles.json");
+  const INVITATIONS_FILE = path.join(dataDir, "organizer_invitations.json");
   const AUDIT_FILE = path.join(dataDir, "change_audit.json");
 
   /**
@@ -142,6 +172,12 @@ function createFileOrganizerStore(options) {
     const roles = readStoreFile(ROLES_FILE, { roles: [] });
     for (const role of /** @type {StoredRole[]} */ (roles.roles || [])) {
       rolesByKey.set(roleKey(role.organizerId, role.accountId), role);
+    }
+    const invitations = readStoreFile(INVITATIONS_FILE, { invitations: [] });
+    for (const invitation of /** @type {StoredInvitation[]} */ (
+      invitations.invitations || []
+    )) {
+      invitationsById.set(invitation.invitationId, invitation);
     }
     const audit = readStoreFile(AUDIT_FILE, { records: [] });
     for (const record of /** @type {StoredAuditRecord[]} */ (
@@ -218,6 +254,10 @@ function createFileOrganizerStore(options) {
     await writeStoreFile(ROLES_FILE, {
       version: STORE_FORMAT_VERSION,
       roles: [...rolesByKey.values()],
+    });
+    await writeStoreFile(INVITATIONS_FILE, {
+      version: STORE_FORMAT_VERSION,
+      invitations: [...invitationsById.values()],
     });
     await writeStoreFile(AUDIT_FILE, {
       version: STORE_FORMAT_VERSION,
@@ -535,6 +575,395 @@ function createFileOrganizerStore(options) {
     );
   }
 
+  // --- membership & role management ----------------------------------------
+
+  /**
+   * The role an account holds in an organizer, or null if it is not a member.
+   *
+   * @param {string} organizerId
+   * @param {string} accountId
+   * @returns {MemberRole | null}
+   */
+  function getMemberRole(organizerId, accountId) {
+    ensureLoaded();
+    return rolesByKey.get(roleKey(organizerId, accountId))?.role ?? null;
+  }
+
+  /**
+   * @param {string} organizerId
+   * @returns {number}
+   */
+  function countOwners(organizerId) {
+    let owners = 0;
+    for (const role of rolesByKey.values()) {
+      if (role.organizerId === organizerId && role.role === "owner")
+        owners += 1;
+    }
+    return owners;
+  }
+
+  /**
+   * Members of an organizer, owners first then by grant time.
+   *
+   * @param {string} organizerId
+   * @returns {StoredRole[]}
+   */
+  function listMembers(organizerId) {
+    ensureLoaded();
+    return [...rolesByKey.values()]
+      .filter((role) => role.organizerId === organizerId)
+      .sort((left, right) => {
+        if (left.role !== right.role) return left.role === "owner" ? -1 : 1;
+        return left.grantedAtMs - right.grantedAtMs;
+      });
+  }
+
+  /**
+   * Organizers the account belongs to, with the account's role in each.
+   *
+   * @param {string} accountId
+   * @returns {{organizerId: string, name: string, role: MemberRole}[]}
+   */
+  function listOrganizersForAccount(accountId) {
+    ensureLoaded();
+    return [...rolesByKey.values()]
+      .filter((role) => role.accountId === accountId)
+      .map((role) => ({
+        organizerId: role.organizerId,
+        name: organizersById.get(role.organizerId)?.name || "",
+        role: role.role,
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  /**
+   * Changes an existing member's role. Owner-only in the route layer; the store
+   * refuses to demote the last remaining Owner so an organizer can never be left
+   * with no one able to manage it.
+   *
+   * @param {{organizerId: string, targetAccountId: string, newRole: MemberRole, actorAccountId: string}} input
+   * @returns {Promise<{ok: true} | {ok: false, reason: "not_member" | "last_owner" | "invalid_role"}>}
+   */
+  async function changeMemberRole(input) {
+    ensureLoaded();
+    const { organizerId, targetAccountId, newRole, actorAccountId } = input;
+    if (newRole !== "owner" && newRole !== "admin") {
+      return { ok: false, reason: "invalid_role" };
+    }
+    const key = roleKey(organizerId, targetAccountId);
+    const role = rolesByKey.get(key);
+    if (!role) return { ok: false, reason: "not_member" };
+    if (role.role === newRole) return { ok: true };
+    if (
+      role.role === "owner" &&
+      newRole === "admin" &&
+      countOwners(organizerId) <= 1
+    ) {
+      return { ok: false, reason: "last_owner" };
+    }
+    role.role = newRole;
+    recordAudit({
+      actorAccountId: String(actorAccountId || ""),
+      actorKind: "account",
+      action: "organizer_member.role_changed",
+      subjectType: "organizer_member",
+      subjectId: targetAccountId,
+      organizerId,
+    });
+    await enqueueWrite(persistNow);
+    return { ok: true };
+  }
+
+  /**
+   * Removes a member from an organizer. Owner-only in the route layer; the last
+   * remaining Owner cannot be removed. Historical Change Audit and attribution
+   * are left intact.
+   *
+   * @param {{organizerId: string, targetAccountId: string, actorAccountId: string}} input
+   * @returns {Promise<{ok: true} | {ok: false, reason: "not_member" | "last_owner"}>}
+   */
+  async function removeMember(input) {
+    ensureLoaded();
+    const { organizerId, targetAccountId, actorAccountId } = input;
+    const key = roleKey(organizerId, targetAccountId);
+    const role = rolesByKey.get(key);
+    if (!role) return { ok: false, reason: "not_member" };
+    if (role.role === "owner" && countOwners(organizerId) <= 1) {
+      return { ok: false, reason: "last_owner" };
+    }
+    rolesByKey.delete(key);
+    recordAudit({
+      actorAccountId: String(actorAccountId || ""),
+      actorKind: "account",
+      action: "organizer_member.removed",
+      subjectType: "organizer_member",
+      subjectId: targetAccountId,
+      organizerId,
+    });
+    await enqueueWrite(persistNow);
+    return { ok: true };
+  }
+
+  // --- invitations ---------------------------------------------------------
+
+  /**
+   * @param {StoredInvitation} invitation
+   * @param {number} now
+   * @returns {boolean}
+   */
+  function isRedeemable(invitation, now) {
+    return invitation.status === "pending" && invitation.expiresAtMs > now;
+  }
+
+  /**
+   * Creates a 7-day Organizer Invitation for a target email. Refuses to invite
+   * an email that already belongs to a member, or to stack a second live
+   * invitation for the same email in the same organizer.
+   *
+   * @param {{organizerId: string, email: string, role: MemberRole, invitedByAccountId: string, memberAccountId?: string | null}} input
+   * @returns {Promise<{ok: true, invitation: StoredInvitation} | {ok: false, reason: "invalid_role" | "already_member" | "already_invited"}>}
+   */
+  async function createInvitation(input) {
+    ensureLoaded();
+    const { organizerId, role, invitedByAccountId } = input;
+    const email = String(input.email || "")
+      .trim()
+      .toLowerCase()
+      .slice(0, MAX_CONTACT_EMAIL_LENGTH);
+    if (role !== "owner" && role !== "admin") {
+      return { ok: false, reason: "invalid_role" };
+    }
+    // If the invitee already has an account and is already a member, there is
+    // nothing to invite them to.
+    if (
+      input.memberAccountId &&
+      rolesByKey.has(roleKey(organizerId, input.memberAccountId))
+    ) {
+      return { ok: false, reason: "already_member" };
+    }
+    const now = clock();
+    for (const invitation of invitationsById.values()) {
+      if (
+        invitation.organizerId === organizerId &&
+        invitation.email === email &&
+        isRedeemable(invitation, now)
+      ) {
+        return { ok: false, reason: "already_invited" };
+      }
+    }
+    /** @type {StoredInvitation} */
+    const invitation = {
+      invitationId: randomId(),
+      organizerId,
+      email,
+      role,
+      status: "pending",
+      invitedByAccountId: String(invitedByAccountId || ""),
+      createdAtMs: now,
+      expiresAtMs: now + invitationTtlMs,
+      acceptedByAccountId: null,
+      acceptedAtMs: null,
+    };
+    invitationsById.set(invitation.invitationId, invitation);
+    recordAudit({
+      actorAccountId: invitation.invitedByAccountId,
+      actorKind: "account",
+      action: "organizer_invitation.created",
+      subjectType: "organizer_invitation",
+      subjectId: invitation.invitationId,
+      organizerId,
+    });
+    await enqueueWrite(persistNow);
+    return { ok: true, invitation };
+  }
+
+  /**
+   * @param {string} invitationId
+   * @returns {StoredInvitation | null}
+   */
+  function getInvitationById(invitationId) {
+    ensureLoaded();
+    if (typeof invitationId !== "string" || invitationId === "") return null;
+    return invitationsById.get(invitationId) || null;
+  }
+
+  /**
+   * Live (pending, unexpired) invitations for an organizer, oldest first.
+   *
+   * @param {string} organizerId
+   * @returns {StoredInvitation[]}
+   */
+  function listInvitationsForOrganizer(organizerId) {
+    ensureLoaded();
+    const now = clock();
+    return [...invitationsById.values()]
+      .filter(
+        (invitation) =>
+          invitation.organizerId === organizerId &&
+          isRedeemable(invitation, now),
+      )
+      .sort((left, right) => left.createdAtMs - right.createdAtMs);
+  }
+
+  /**
+   * Live invitations addressed to an email, with the organizer name resolved,
+   * for the invitee's console. Never exposes organizers the account has no
+   * invitation to.
+   *
+   * @param {string} email
+   * @returns {{invitationId: string, organizerId: string, organizerName: string, role: MemberRole, expiresAtMs: number}[]}
+   */
+  function listPendingInvitationsForEmail(email) {
+    ensureLoaded();
+    const now = clock();
+    const normalized = String(email || "")
+      .trim()
+      .toLowerCase();
+    if (normalized === "") return [];
+    return [...invitationsById.values()]
+      .filter(
+        (invitation) =>
+          invitation.email === normalized && isRedeemable(invitation, now),
+      )
+      .sort((left, right) => left.createdAtMs - right.createdAtMs)
+      .map((invitation) => ({
+        invitationId: invitation.invitationId,
+        organizerId: invitation.organizerId,
+        organizerName: organizersById.get(invitation.organizerId)?.name || "",
+        role: invitation.role,
+        expiresAtMs: invitation.expiresAtMs,
+      }));
+  }
+
+  /**
+   * Accepts an invitation. Only the account whose verified email matches the
+   * invitation may accept, and only while it is still pending and unexpired.
+   * The check-and-consume is synchronous, so concurrent accepts establish
+   * membership exactly once. Invalid, expired, revoked, used, and
+   * wrong-recipient invitations all fail identically so nothing about other
+   * organizers leaks.
+   *
+   * @param {{invitationId: string, accountId: string, accountEmail: string}} input
+   * @returns {Promise<{ok: true, organizerId: string, role: MemberRole} | {ok: false, reason: "invalid"}>}
+   */
+  async function acceptInvitation(input) {
+    ensureLoaded();
+    const invitation = invitationsById.get(String(input.invitationId || ""));
+    const accountEmail = String(input.accountEmail || "")
+      .trim()
+      .toLowerCase();
+    const now = clock();
+    if (
+      !invitation ||
+      !isRedeemable(invitation, now) ||
+      invitation.email !== accountEmail
+    ) {
+      return { ok: false, reason: "invalid" };
+    }
+    const accountId = String(input.accountId || "");
+    invitation.status = "accepted";
+    invitation.acceptedByAccountId = accountId;
+    invitation.acceptedAtMs = now;
+    // Establishing membership never downgrades an existing role: if the account
+    // already holds a role (gained through another path since the invite), keep
+    // it and report the real role rather than the invitation's.
+    const key = roleKey(invitation.organizerId, accountId);
+    const existingRole = rolesByKey.get(key);
+    if (!existingRole) {
+      rolesByKey.set(key, {
+        organizerId: invitation.organizerId,
+        accountId,
+        role: invitation.role,
+        grantedAtMs: now,
+      });
+    }
+    recordAudit({
+      actorAccountId: accountId,
+      actorKind: "account",
+      action: "organizer_invitation.accepted",
+      subjectType: "organizer_invitation",
+      subjectId: invitation.invitationId,
+      organizerId: invitation.organizerId,
+    });
+    await enqueueWrite(persistNow);
+    return {
+      ok: true,
+      organizerId: invitation.organizerId,
+      role: existingRole ? existingRole.role : invitation.role,
+    };
+  }
+
+  /**
+   * Declines an invitation. Only the target account may decline, and only a
+   * still-live invitation.
+   *
+   * @param {{invitationId: string, accountId: string, accountEmail: string}} input
+   * @returns {Promise<{ok: true} | {ok: false, reason: "invalid"}>}
+   */
+  async function declineInvitation(input) {
+    ensureLoaded();
+    const invitation = invitationsById.get(String(input.invitationId || ""));
+    const accountEmail = String(input.accountEmail || "")
+      .trim()
+      .toLowerCase();
+    if (
+      !invitation ||
+      !isRedeemable(invitation, clock()) ||
+      invitation.email !== accountEmail
+    ) {
+      return { ok: false, reason: "invalid" };
+    }
+    invitation.status = "declined";
+    recordAudit({
+      actorAccountId: String(input.accountId || ""),
+      actorKind: "account",
+      action: "organizer_invitation.declined",
+      subjectType: "organizer_invitation",
+      subjectId: invitation.invitationId,
+      organizerId: invitation.organizerId,
+    });
+    await enqueueWrite(persistNow);
+    return { ok: true };
+  }
+
+  /**
+   * Revokes a still-live invitation. Owner-only in the route layer.
+   *
+   * @param {{invitationId: string, actorAccountId: string}} input
+   * @returns {Promise<{ok: true} | {ok: false, reason: "invalid"}>}
+   */
+  async function revokeInvitation(input) {
+    ensureLoaded();
+    const invitation = invitationsById.get(String(input.invitationId || ""));
+    if (!invitation || invitation.status !== "pending") {
+      return { ok: false, reason: "invalid" };
+    }
+    invitation.status = "revoked";
+    recordAudit({
+      actorAccountId: String(input.actorAccountId || ""),
+      actorKind: "account",
+      action: "organizer_invitation.revoked",
+      subjectType: "organizer_invitation",
+      subjectId: invitation.invitationId,
+      organizerId: invitation.organizerId,
+    });
+    await enqueueWrite(persistNow);
+    return { ok: true };
+  }
+
+  /**
+   * Change Audit records scoped to one organizer, oldest first.
+   *
+   * @param {string} organizerId
+   * @returns {StoredAuditRecord[]}
+   */
+  function listAuditForOrganizer(organizerId) {
+    ensureLoaded();
+    return auditRecords
+      .filter((record) => record.organizerId === organizerId)
+      .sort((left, right) => left.createdAtMs - right.createdAtMs);
+  }
+
   /**
    * Resolves once every scheduled write has landed on disk.
    *
@@ -556,6 +985,19 @@ function createFileOrganizerStore(options) {
     getOrganizerById,
     listRolesForOrganizer,
     listRolesForAccount,
+    getMemberRole,
+    listMembers,
+    listOrganizersForAccount,
+    changeMemberRole,
+    removeMember,
+    createInvitation,
+    getInvitationById,
+    listInvitationsForOrganizer,
+    listPendingInvitationsForEmail,
+    acceptInvitation,
+    declineInvitation,
+    revokeInvitation,
+    listAuditForOrganizer,
     flush,
   };
 }

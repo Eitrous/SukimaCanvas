@@ -34,6 +34,23 @@ const AUDIT_ACTION_KEYS = {
   "organizer_application.rejected": "hosted_operator_audit_rejected",
 };
 
+/** Audit action -> translation key for the organizer console activity log. */
+const ORG_AUDIT_ACTION_KEYS = {
+  "organizer_application.approved": "hosted_org_audit_created",
+  "organizer_invitation.created": "hosted_org_audit_invitation_created",
+  "organizer_invitation.accepted": "hosted_org_audit_invitation_accepted",
+  "organizer_invitation.declined": "hosted_org_audit_invitation_declined",
+  "organizer_invitation.revoked": "hosted_org_audit_invitation_revoked",
+  "organizer_member.role_changed": "hosted_org_audit_role_changed",
+  "organizer_member.removed": "hosted_org_audit_member_removed",
+};
+
+/** Member role -> translation key for display labels. */
+const ROLE_LABEL_KEYS = {
+  owner: "hosted_role_owner",
+  admin: "hosted_role_admin",
+};
+
 /**
  * HTTP flows for Organizer Applications and the Platform Operator console.
  *
@@ -54,6 +71,8 @@ const AUDIT_ACTION_KEYS = {
  *     organizerApply: HostedTemplate,
  *     operator: HostedTemplate,
  *     operatorApplication: HostedTemplate,
+ *     organizerConsole: HostedTemplate,
+ *     organizerManage: HostedTemplate,
  *   },
  * }} dependencies
  */
@@ -525,12 +544,476 @@ function createOrganizerRoutes(dependencies) {
     return handleDecision(ctx, "reject");
   }
 
+  // --- organizer console: memberships & invitations ------------------------
+
+  /**
+   * @param {HttpRouteContext} ctx
+   * @param {string} key
+   * @param {import("../../http/templating.mjs").Template} template
+   * @returns {string}
+   */
+  function roleLabel(ctx, key, template) {
+    const labelKey =
+      ROLE_LABEL_KEYS[/** @type {keyof typeof ROLE_LABEL_KEYS} */ (key)];
+    return labelKey ? translate(template, ctx, labelKey) : key;
+  }
+
+  /**
+   * @param {HttpRouteContext} ctx
+   * @returns {void | Promise<void>}
+   */
+  function serveOrganizerConsole(ctx) {
+    if (ctx.request.method !== "GET") {
+      throw new BoundaryError(405, "method_not_allowed");
+    }
+    if (!signedInAccount(ctx)) {
+      redirectToLogin(ctx);
+      return;
+    }
+    renderConsole(ctx, 200, {});
+  }
+
+  /**
+   * @param {HttpRouteContext} ctx
+   * @param {number} statusCode
+   * @param {{errorKey?: string}} state
+   * @returns {void}
+   */
+  function renderConsole(ctx, statusCode, state) {
+    const account = signedInAccount(ctx);
+    if (!account) {
+      redirectToLogin(ctx);
+      return;
+    }
+    const memberships = organizerStore
+      .listOrganizersForAccount(account.accountId)
+      .map((membership) => ({
+        organizerId: membership.organizerId,
+        name: membership.name,
+        roleLabel: roleLabel(ctx, membership.role, templates.organizerConsole),
+      }));
+    const invitations = organizerStore
+      .listPendingInvitationsForEmail(account.email)
+      .map((invitation) => ({
+        invitationId: invitation.invitationId,
+        organizerName: invitation.organizerName,
+        roleLabel: roleLabel(ctx, invitation.role, templates.organizerConsole),
+      }));
+    templates.organizerConsole.serveWithStatus(
+      ctx.request,
+      ctx.response,
+      statusCode,
+      {
+        hostedOrganizerMemberships: memberships,
+        hostedOrganizerHasMemberships: memberships.length > 0,
+        hostedOrganizerInvitations: invitations,
+        hostedOrganizerHasInvitations: invitations.length > 0,
+        hostedOrganizerConsoleError: state.errorKey
+          ? translate(templates.organizerConsole, ctx, state.errorKey)
+          : undefined,
+        csrfToken: ensureCsrfToken(ctx),
+      },
+    );
+  }
+
+  /**
+   * @param {HttpRouteContext} ctx
+   * @param {"accept" | "decline"} decision
+   * @returns {Promise<void>}
+   */
+  async function handleInvitationResponse(ctx, decision) {
+    if (ctx.request.method !== "POST") {
+      throw new BoundaryError(405, "method_not_allowed");
+    }
+    const account = signedInAccount(ctx);
+    if (!account) {
+      redirectToLogin(ctx);
+      return;
+    }
+    const form = await readFormBody(ctx.request);
+    if (!requestHasValidCsrf(ctx.request, form)) {
+      renderConsole(ctx, 403, { errorKey: "hosted_error_csrf" });
+      return;
+    }
+    const invitationId = ctx.params.invitationId || "";
+    const result =
+      decision === "accept"
+        ? await organizerStore.acceptInvitation({
+            invitationId,
+            accountId: account.accountId,
+            accountEmail: account.email,
+          })
+        : await organizerStore.declineInvitation({
+            invitationId,
+            accountId: account.accountId,
+            accountEmail: account.email,
+          });
+    if (!result.ok) {
+      // Invalid, expired, revoked, used, and wrong-recipient invitations all
+      // fail identically so nothing about other organizers leaks.
+      renderConsole(ctx, 409, {
+        errorKey: "hosted_organizer_invitation_unavailable",
+      });
+      return;
+    }
+    logger.info(`hosted.organizer_invitation_${decision}ed`, {
+      account_id: account.accountId,
+    });
+    if (decision === "accept" && "organizerId" in result) {
+      seeOther(ctx, publicPath(config, `/organizers/${result.organizerId}`));
+      return;
+    }
+    seeOther(ctx, publicPath(config, "/organizer"));
+  }
+
+  /**
+   * @param {HttpRouteContext} ctx
+   * @returns {Promise<void>}
+   */
+  function serveOrganizerInvitationAccept(ctx) {
+    return handleInvitationResponse(ctx, "accept");
+  }
+
+  /**
+   * @param {HttpRouteContext} ctx
+   * @returns {Promise<void>}
+   */
+  function serveOrganizerInvitationDecline(ctx) {
+    return handleInvitationResponse(ctx, "decline");
+  }
+
+  // --- organizer management (member/invitation admin) ----------------------
+
+  /**
+   * Resolves the signed-in account's membership in an organizer. Redirects
+   * signed-out visitors to login and returns null; a signed-in non-member gets a
+   * 404 so the organizer's existence is not disclosed.
+   *
+   * @param {HttpRouteContext} ctx
+   * @param {string} organizerId
+   * @returns {{account: {accountId: string, email: string}, role: "owner" | "admin"} | null}
+   */
+  function requireMember(ctx, organizerId) {
+    const account = signedInAccount(ctx);
+    if (!account) {
+      redirectToLogin(ctx);
+      return null;
+    }
+    const role = organizerStore.getMemberRole(organizerId, account.accountId);
+    if (!role || !organizerStore.getOrganizerById(organizerId)) {
+      throw new BoundaryError(404, "organizer_not_found");
+    }
+    return { account, role };
+  }
+
+  /**
+   * Like requireMember, but additionally requires the Owner role for the
+   * Owner-only management actions; an Admin member gets a 403.
+   *
+   * @param {HttpRouteContext} ctx
+   * @param {string} organizerId
+   * @returns {{account: {accountId: string, email: string}, role: "owner"} | null}
+   */
+  function requireOwner(ctx, organizerId) {
+    const membership = requireMember(ctx, organizerId);
+    if (!membership) return null;
+    if (membership.role !== "owner") {
+      throw new BoundaryError(403, "organizer_owner_required");
+    }
+    return { account: membership.account, role: "owner" };
+  }
+
+  /**
+   * @param {HttpRouteContext} ctx
+   * @returns {void}
+   */
+  function serveOrganizerManage(ctx) {
+    if (ctx.request.method !== "GET") {
+      throw new BoundaryError(405, "method_not_allowed");
+    }
+    const organizerId = ctx.params.organizerId || "";
+    const membership = requireMember(ctx, organizerId);
+    if (!membership) return;
+    renderManage(ctx, 200, organizerId, membership, {});
+  }
+
+  /**
+   * @param {HttpRouteContext} ctx
+   * @param {number} statusCode
+   * @param {string} organizerId
+   * @param {{account: {accountId: string, email: string}, role: "owner" | "admin"}} membership
+   * @param {{errorKey?: string}} state
+   * @returns {void}
+   */
+  function renderManage(ctx, statusCode, organizerId, membership, state) {
+    const template = templates.organizerManage;
+    const { language } = template.translationsFor(ctx.request, ctx.url);
+    const organizer = organizerStore.getOrganizerById(organizerId);
+    if (!organizer) throw new BoundaryError(404, "organizer_not_found");
+    const isOwner = membership.role === "owner";
+    const members = organizerStore.listMembers(organizerId).map((member) => {
+      const account = accountStore.getAccountById(member.accountId);
+      return {
+        accountId: member.accountId,
+        email: account ? account.email : "",
+        roleLabel: roleLabel(ctx, member.role, template),
+        isOwner: member.role === "owner",
+        isSelf: member.accountId === membership.account.accountId,
+        // The role toggle offers the opposite role.
+        toggleRole: member.role === "owner" ? "admin" : "owner",
+        toggleLabel: translate(
+          template,
+          ctx,
+          member.role === "owner"
+            ? "hosted_org_member_make_admin"
+            : "hosted_org_member_make_owner",
+        ),
+      };
+    });
+    const invitations = organizerStore
+      .listInvitationsForOrganizer(organizerId)
+      .map((invitation) => ({
+        invitationId: invitation.invitationId,
+        email: invitation.email,
+        roleLabel: roleLabel(ctx, invitation.role, template),
+        expiresAt: formatTimestamp(language, invitation.expiresAtMs),
+      }));
+    // The change-audit trail is an Owner-only view. Operator-performed records
+    // (organizer creation) are shown with a generic label so a platform
+    // operator's personal email is never disclosed to organizer members.
+    const audit = isOwner
+      ? organizerStore.listAuditForOrganizer(organizerId).map((record) => {
+          const actionKey =
+            ORG_AUDIT_ACTION_KEYS[
+              /** @type {keyof typeof ORG_AUDIT_ACTION_KEYS} */ (record.action)
+            ];
+          const actor =
+            record.actorKind === "operator"
+              ? translate(template, ctx, "hosted_org_audit_actor_platform")
+              : accountStore.getAccountById(record.actorAccountId)?.email || "";
+          return {
+            action: actionKey
+              ? translate(template, ctx, actionKey)
+              : record.action,
+            actorEmail: actor,
+            at: formatTimestamp(language, record.createdAtMs),
+          };
+        })
+      : [];
+    template.serveWithStatus(ctx.request, ctx.response, statusCode, {
+      hostedOrganizerId: organizerId,
+      hostedOrganizerName: organizer.name,
+      hostedOrganizerRoleLabel: roleLabel(ctx, membership.role, template),
+      hostedOrganizerIsOwner: isOwner,
+      hostedOrganizerMembers: members,
+      hostedOrganizerInvites: invitations,
+      hostedOrganizerHasInvites: invitations.length > 0,
+      hostedOrganizerAudit: audit,
+      hostedOrganizerManageError: state.errorKey
+        ? translate(template, ctx, state.errorKey)
+        : undefined,
+      csrfToken: ensureCsrfToken(ctx),
+    });
+  }
+
+  /**
+   * @param {HttpRouteContext} ctx
+   * @returns {Promise<void>}
+   */
+  async function serveOrganizerInvite(ctx) {
+    if (ctx.request.method !== "POST") {
+      throw new BoundaryError(405, "method_not_allowed");
+    }
+    const organizerId = ctx.params.organizerId || "";
+    const owner = requireOwner(ctx, organizerId);
+    if (!owner) return;
+    const form = await readFormBody(ctx.request);
+    if (!requestHasValidCsrf(ctx.request, form)) {
+      renderManage(ctx, 403, organizerId, owner, {
+        errorKey: "hosted_error_csrf",
+      });
+      return;
+    }
+    const address = resolveRequestClientIpSafe(config, ctx.request);
+    const limit = config.HOSTED_ORGANIZER_INVITE_ATTEMPTS_LIMIT;
+    const windowMs = config.HOSTED_ORGANIZER_INVITE_ATTEMPTS_WINDOW_MS;
+    if (
+      !limiter.consume(
+        "organizer_invite",
+        `account:${owner.account.accountId}`,
+        limit,
+        windowMs,
+      ).allowed ||
+      !limiter.consume("organizer_invite", `ip:${address}`, limit, windowMs)
+        .allowed
+    ) {
+      renderManage(ctx, 429, organizerId, owner, {
+        errorKey: "hosted_error_rate_limited",
+      });
+      return;
+    }
+    const email = normalizeEmail(form.get("email") || "");
+    const role = form.get("role") === "owner" ? "owner" : "admin";
+    if (
+      email.length > MAX_CONTACT_EMAIL_LENGTH ||
+      !isValidNormalizedEmail(email)
+    ) {
+      renderManage(ctx, 400, organizerId, owner, {
+        errorKey: "hosted_org_invite_error_email",
+      });
+      return;
+    }
+    const invitee = accountStore.getAccountByEmail(email);
+    const result = await organizerStore.createInvitation({
+      organizerId,
+      email,
+      role,
+      invitedByAccountId: owner.account.accountId,
+      memberAccountId: invitee ? invitee.accountId : null,
+    });
+    if (!result.ok) {
+      renderManage(ctx, 409, organizerId, owner, {
+        errorKey:
+          result.reason === "already_member"
+            ? "hosted_org_invite_error_member"
+            : "hosted_org_invite_error_pending",
+      });
+      return;
+    }
+    logger.info("hosted.organizer_invitation_created", {
+      organizer_id: organizerId,
+      invited_by: owner.account.accountId,
+      invitation_id: result.invitation.invitationId,
+    });
+    seeOther(ctx, publicPath(config, `/organizers/${organizerId}`));
+  }
+
+  /**
+   * @param {HttpRouteContext} ctx
+   * @returns {Promise<void>}
+   */
+  async function serveOrganizerInvitationRevoke(ctx) {
+    if (ctx.request.method !== "POST") {
+      throw new BoundaryError(405, "method_not_allowed");
+    }
+    const organizerId = ctx.params.organizerId || "";
+    const owner = requireOwner(ctx, organizerId);
+    if (!owner) return;
+    const form = await readFormBody(ctx.request);
+    if (!requestHasValidCsrf(ctx.request, form)) {
+      renderManage(ctx, 403, organizerId, owner, {
+        errorKey: "hosted_error_csrf",
+      });
+      return;
+    }
+    const invitationId = ctx.params.invitationId || "";
+    const invitation = organizerStore.getInvitationById(invitationId);
+    // The invitation must belong to this organizer; otherwise treat it as
+    // absent so nothing about another organizer's invitations leaks.
+    if (!invitation || invitation.organizerId !== organizerId) {
+      throw new BoundaryError(404, "invitation_not_found");
+    }
+    await organizerStore.revokeInvitation({
+      invitationId,
+      actorAccountId: owner.account.accountId,
+    });
+    seeOther(ctx, publicPath(config, `/organizers/${organizerId}`));
+  }
+
+  /**
+   * @param {HttpRouteContext} ctx
+   * @returns {Promise<void>}
+   */
+  async function serveOrganizerMemberRole(ctx) {
+    if (ctx.request.method !== "POST") {
+      throw new BoundaryError(405, "method_not_allowed");
+    }
+    const organizerId = ctx.params.organizerId || "";
+    const owner = requireOwner(ctx, organizerId);
+    if (!owner) return;
+    const form = await readFormBody(ctx.request);
+    if (!requestHasValidCsrf(ctx.request, form)) {
+      renderManage(ctx, 403, organizerId, owner, {
+        errorKey: "hosted_error_csrf",
+      });
+      return;
+    }
+    const newRole = form.get("role") === "owner" ? "owner" : "admin";
+    const result = await organizerStore.changeMemberRole({
+      organizerId,
+      targetAccountId: ctx.params.accountId || "",
+      newRole,
+      actorAccountId: owner.account.accountId,
+    });
+    if (!result.ok) {
+      if (result.reason === "not_member") {
+        throw new BoundaryError(404, "member_not_found");
+      }
+      renderManage(ctx, 409, organizerId, owner, {
+        errorKey: "hosted_org_member_error_last_owner",
+      });
+      return;
+    }
+    logger.info("hosted.organizer_member_role_changed", {
+      organizer_id: organizerId,
+      actor: owner.account.accountId,
+    });
+    seeOther(ctx, publicPath(config, `/organizers/${organizerId}`));
+  }
+
+  /**
+   * @param {HttpRouteContext} ctx
+   * @returns {Promise<void>}
+   */
+  async function serveOrganizerMemberRemove(ctx) {
+    if (ctx.request.method !== "POST") {
+      throw new BoundaryError(405, "method_not_allowed");
+    }
+    const organizerId = ctx.params.organizerId || "";
+    const owner = requireOwner(ctx, organizerId);
+    if (!owner) return;
+    const form = await readFormBody(ctx.request);
+    if (!requestHasValidCsrf(ctx.request, form)) {
+      renderManage(ctx, 403, organizerId, owner, {
+        errorKey: "hosted_error_csrf",
+      });
+      return;
+    }
+    const result = await organizerStore.removeMember({
+      organizerId,
+      targetAccountId: ctx.params.accountId || "",
+      actorAccountId: owner.account.accountId,
+    });
+    if (!result.ok) {
+      if (result.reason === "not_member") {
+        throw new BoundaryError(404, "member_not_found");
+      }
+      renderManage(ctx, 409, organizerId, owner, {
+        errorKey: "hosted_org_member_error_last_owner",
+      });
+      return;
+    }
+    logger.info("hosted.organizer_member_removed", {
+      organizer_id: organizerId,
+      actor: owner.account.accountId,
+    });
+    seeOther(ctx, publicPath(config, `/organizers/${organizerId}`));
+  }
+
   return {
     serveOrganizerApply,
     serveOperatorConsole,
     serveOperatorApplication,
     serveOperatorApproveApplication,
     serveOperatorRejectApplication,
+    serveOrganizerConsole,
+    serveOrganizerInvitationAccept,
+    serveOrganizerInvitationDecline,
+    serveOrganizerManage,
+    serveOrganizerInvite,
+    serveOrganizerInvitationRevoke,
+    serveOrganizerMemberRole,
+    serveOrganizerMemberRemove,
   };
 }
 

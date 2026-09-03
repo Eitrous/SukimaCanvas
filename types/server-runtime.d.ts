@@ -47,6 +47,14 @@ export type HostedEventModule = {
   serveOperatorApplication: HttpRouteHandler;
   serveOperatorApproveApplication: HttpRouteHandler;
   serveOperatorRejectApplication: HttpRouteHandler;
+  serveOrganizerConsole: HttpRouteHandler;
+  serveOrganizerInvitationAccept: HttpRouteHandler;
+  serveOrganizerInvitationDecline: HttpRouteHandler;
+  serveOrganizerManage: HttpRouteHandler;
+  serveOrganizerInvite: HttpRouteHandler;
+  serveOrganizerInvitationRevoke: HttpRouteHandler;
+  serveOrganizerMemberRole: HttpRouteHandler;
+  serveOrganizerMemberRemove: HttpRouteHandler;
 };
 
 export type ObservedHttpRequest = {

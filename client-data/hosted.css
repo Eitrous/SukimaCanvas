@@ -522,3 +522,47 @@ h1 {
   color: var(--hosted-text);
   font-weight: 600;
 }
+
+.hosted-organizer-queue,
+.hosted-member-list {
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+
+.hosted-organizer-queue-item,
+.hosted-member-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--hosted-border);
+}
+
+.hosted-organizer-queue-meta,
+.hosted-member-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--hosted-muted);
+  font-size: 12px;
+}
+
+.hosted-organizer-queue-name,
+.hosted-member-email {
+  color: var(--hosted-text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.hosted-member-role {
+  color: var(--hosted-muted);
+}
+
+.hosted-organizer-invitation-actions,
+.hosted-member-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
