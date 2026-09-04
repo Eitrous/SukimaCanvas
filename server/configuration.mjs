@@ -188,6 +188,26 @@ export const HOSTED_BRAND_ASSET_ATTEMPTS_WINDOW_MS = parseIntegerEnv(
   15 * 60 * 1000,
 );
 
+/**
+ * Drain window between a Board Session entering CLOSING and being sealed CLOSED,
+ * during which accepted writes are flushed before the archive is produced.
+ */
+export const HOSTED_BOARD_SESSION_CLOSE_DRAIN_MS = parseIntegerEnv(
+  "WBO_HOSTED_BOARD_SESSION_CLOSE_DRAIN_MS",
+  60 * 1000,
+);
+
+/**
+ * How often the durable lifecycle poker advances Board Sessions with no active
+ * reader. The persisted times plus the service clock are the source of truth;
+ * the poke only triggers a catch-up. `0` disables the background poke (e.g. in
+ * tests, which drive advancement through requests against an injected clock).
+ */
+export const HOSTED_LIFECYCLE_POLL_MS = parseIntegerEnv(
+  "WBO_HOSTED_LIFECYCLE_POLL_MS",
+  30 * 1000,
+);
+
 /** Capacity window buffer added before a reservation's start and after its end. */
 export const HOSTED_CAPACITY_WINDOW_BUFFER_MS = parseIntegerEnv(
   "WBO_HOSTED_CAPACITY_WINDOW_BUFFER_MS",

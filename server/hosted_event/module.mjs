@@ -1,3 +1,4 @@
+import observability from "../observability/index.mjs";
 import { localizedHref, Template } from "../http/templating.mjs";
 import { createHostedCaptcha } from "./accounts/captcha.mjs";
 import { createOutboxMailDelivery } from "./accounts/mail.mjs";
@@ -14,6 +15,8 @@ import { createFileOrganizerStore } from "./organizers/store.mjs";
 import { createReservationRoutes } from "./reservations/routes.mjs";
 
 /** @import { HttpRequest, HttpResponse, ServerConfig } from "../../types/server-runtime.d.ts" */
+
+const { logger } = observability;
 
 const HOSTED_LANGUAGES = ["en", "zh-CN"];
 const ROLLING_VERSION_LABELS = new Set([
@@ -123,6 +126,8 @@ class HostedPageTemplate extends Template {
  *   organizerReservationTemplatePath: string,
  *   operatorReservationsTemplatePath: string,
  *   operatorReservationTemplatePath: string,
+ *   operatorChangesTemplatePath: string,
+ *   operatorChangeTemplatePath: string,
  *   eventTemplatePath: string,
  *   organizerEventTemplatePath: string,
  *   htmlHeadSnippet?: string,
@@ -296,6 +301,16 @@ function createHostedEventModule(config, paths) {
         config,
         templateOptions,
       ),
+      operatorChanges: new HostedPageTemplate(
+        paths.operatorChangesTemplatePath,
+        config,
+        templateOptions,
+      ),
+      operatorChange: new HostedPageTemplate(
+        paths.operatorChangeTemplatePath,
+        config,
+        templateOptions,
+      ),
     },
   });
 
@@ -320,6 +335,30 @@ function createHostedEventModule(config, paths) {
       ),
     },
   });
+
+  // Durable lifecycle poker: advances Board Sessions with no active reader so a
+  // headless event still opens and closes on time. The persisted times plus the
+  // service clock are authoritative — the interval only triggers an idempotent
+  // catch-up. It stays off when a test injects a clock (advancement is driven
+  // through requests) or when the poll interval is zero, and never keeps the
+  // process alive on its own.
+  const pollMs = config.HOSTED_LIFECYCLE_POLL_MS;
+  if (
+    config.HOSTED_MODE === true &&
+    clock === undefined &&
+    typeof pollMs === "number" &&
+    pollMs > 0
+  ) {
+    const closeDrainMs = config.HOSTED_BOARD_SESSION_CLOSE_DRAIN_MS;
+    const timer = setInterval(() => {
+      organizerStore
+        .advanceLifecycle({ now: Date.now(), closeDrainMs })
+        .catch((error) => {
+          logger.error("hosted.lifecycle_poke_failed", { error });
+        });
+    }, pollMs);
+    if (typeof timer.unref === "function") timer.unref();
+  }
 
   return {
     enabled: config.HOSTED_MODE === true,

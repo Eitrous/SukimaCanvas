@@ -137,6 +137,7 @@ function createEventRoutes(dependencies) {
     if (!event) throw new BoundaryError(404, "event_not_found");
     const template = templates.event;
     const organizer = organizerStore.getOrganizerById(event.organizerId);
+    const cancelled = event.status === "cancelled";
     const lifecycle = eventLifecycleState(event, clock());
     template.serveWithStatus(ctx.request, ctx.response, 200, {
       hostedEventName: event.name,
@@ -150,11 +151,14 @@ function createEventRoutes(dependencies) {
       hostedEventStatusLabel: translate(
         template,
         ctx,
-        EVENT_STATUS_KEYS[lifecycle],
+        cancelled
+          ? "hosted_event_status_cancelled"
+          : EVENT_STATUS_KEYS[lifecycle],
       ),
-      hostedEventScheduled: lifecycle === "scheduled",
-      hostedEventOpen: lifecycle === "open",
-      hostedEventEnded: lifecycle === "ended",
+      hostedEventCancelled: cancelled,
+      hostedEventScheduled: !cancelled && lifecycle === "scheduled",
+      hostedEventOpen: !cancelled && lifecycle === "open",
+      hostedEventEnded: !cancelled && lifecycle === "ended",
     });
   }
 

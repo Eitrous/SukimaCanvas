@@ -28,6 +28,9 @@ async function createHostedServer(overrides = {}) {
       WEBROOT: CLIENT_WEBROOT,
       HOSTED_MODE: true,
       HOSTED_DATA_DIR: path.join(root, "hosted-data"),
+      // Node integration tests drive lifecycle advancement through requests, so
+      // the background poker stays off unless a test opts in.
+      HOSTED_LIFECYCLE_POLL_MS: 0,
       ...overrides,
     }),
     {

@@ -7,7 +7,7 @@ import { serveError } from "../http/observation.mjs";
  * concept, so each route rejects with a deterministic 404 instead of falling
  * through to static file resolution.
  *
- * @param {keyof Pick<HostedEventModule, "serveRegister" | "serveLogin" | "serveVerify" | "serveLogout" | "serveForgot" | "serveReset" | "serveAccount" | "serveAccountPassword" | "serveAccountSessionRevoke" | "serveAccountSessionsRevokeOthers" | "serveOrganizerApply" | "serveOperatorConsole" | "serveOperatorApplication" | "serveOperatorApproveApplication" | "serveOperatorRejectApplication" | "serveOrganizerConsole" | "serveOrganizerInvitationAccept" | "serveOrganizerInvitationDecline" | "serveOrganizerManage" | "serveOrganizerInvite" | "serveOrganizerInvitationRevoke" | "serveOrganizerMemberRole" | "serveOrganizerMemberRemove" | "serveOrganizerReservations" | "serveOrganizerReservation" | "serveSubmitReservation" | "serveCancelReservation" | "serveOperatorReservations" | "serveOperatorReservation" | "serveOperatorApproveReservation" | "serveOperatorRejectReservation" | "serveEventPage" | "serveBrandAsset" | "serveOrganizerEvent" | "serveOrganizerEventCover">} handlerName
+ * @param {keyof Pick<HostedEventModule, "serveRegister" | "serveLogin" | "serveVerify" | "serveLogout" | "serveForgot" | "serveReset" | "serveAccount" | "serveAccountPassword" | "serveAccountSessionRevoke" | "serveAccountSessionsRevokeOthers" | "serveOrganizerApply" | "serveOperatorConsole" | "serveOperatorApplication" | "serveOperatorApproveApplication" | "serveOperatorRejectApplication" | "serveOrganizerConsole" | "serveOrganizerInvitationAccept" | "serveOrganizerInvitationDecline" | "serveOrganizerManage" | "serveOrganizerInvite" | "serveOrganizerInvitationRevoke" | "serveOrganizerMemberRole" | "serveOrganizerMemberRemove" | "serveOrganizerReservations" | "serveOrganizerReservation" | "serveSubmitReservation" | "serveCancelReservation" | "serveSubmitChangeRequest" | "serveOperatorReservations" | "serveOperatorReservation" | "serveOperatorApproveReservation" | "serveOperatorRejectReservation" | "serveOperatorChanges" | "serveOperatorChange" | "serveOperatorApproveChange" | "serveOperatorRejectChange" | "serveEventPage" | "serveBrandAsset" | "serveOrganizerEvent" | "serveOrganizerEventCover">} handlerName
  * @returns {import("../../types/server-runtime.d.ts").HttpRouteHandler}
  */
 function serveHostedAccountPage(handlerName) {
@@ -104,6 +104,21 @@ export const serveOperatorApproveReservation = serveHostedAccountPage(
 );
 export const serveOperatorRejectReservation = serveHostedAccountPage(
   "serveOperatorRejectReservation",
+);
+export const serveSubmitChangeRequest = serveHostedAccountPage(
+  "serveSubmitChangeRequest",
+);
+export const serveOperatorChanges = serveHostedAccountPage(
+  "serveOperatorChanges",
+);
+export const serveOperatorChange = serveHostedAccountPage(
+  "serveOperatorChange",
+);
+export const serveOperatorApproveChange = serveHostedAccountPage(
+  "serveOperatorApproveChange",
+);
+export const serveOperatorRejectChange = serveHostedAccountPage(
+  "serveOperatorRejectChange",
 );
 export const serveEventPage = serveHostedAccountPage("serveEventPage");
 export const serveBrandAsset = serveHostedAccountPage("serveBrandAsset");

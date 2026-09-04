@@ -38,6 +38,28 @@ const STATUS_LABEL_KEYS = {
   cancelled: "hosted_reservation_status_cancelled",
 };
 
+/** Board Session lifecycle status -> translation key. */
+const SESSION_STATUS_LABEL_KEYS = {
+  scheduled: "hosted_session_status_scheduled",
+  open: "hosted_session_status_open",
+  closing: "hosted_session_status_closing",
+  closed: "hosted_session_status_closed",
+  cancelled: "hosted_session_status_cancelled",
+};
+
+/** Change Request status -> translation key. */
+const CHANGE_STATUS_LABEL_KEYS = {
+  pending: "hosted_change_status_pending",
+  applied: "hosted_change_status_applied",
+  rejected: "hosted_change_status_rejected",
+};
+
+/** Change Request kind -> translation key. */
+const CHANGE_KIND_LABEL_KEYS = {
+  amend: "hosted_change_kind_amend",
+  cancel: "hosted_change_kind_cancel",
+};
+
 /**
  * HTTP flows for Reservations and their Platform Operator approval.
  *
@@ -58,6 +80,8 @@ const STATUS_LABEL_KEYS = {
  *     organizerReservation: HostedTemplate,
  *     operatorReservations: HostedTemplate,
  *     operatorReservation: HostedTemplate,
+ *     operatorChanges: HostedTemplate,
+ *     operatorChange: HostedTemplate,
  *   },
  *   clock?: () => number,
  * }} dependencies
@@ -74,12 +98,24 @@ function createReservationRoutes(dependencies) {
   const clock = dependencies.clock || (() => Date.now());
   const { ensureCsrfToken, requestHasValidCsrf } = createFormSecurity(config);
   const offsetMinutes = config.HOSTED_SERVICE_UTC_OFFSET_MINUTES;
+  const closeDrainMs = config.HOSTED_BOARD_SESSION_CLOSE_DRAIN_MS;
 
   const capacityOptions = () => ({
     bufferMs: config.HOSTED_CAPACITY_WINDOW_BUFFER_MS,
     sessionLimit: config.HOSTED_MAX_CONCURRENT_BOARD_SESSIONS,
     seatLimit: config.HOSTED_MAX_CONCURRENT_SEATS,
   });
+
+  /**
+   * Lazily runs the durable lifecycle advancement so any page or decision that
+   * reads Board Session state sees the authoritative status at the current
+   * service clock. Idempotent, so calling it on every read is safe.
+   *
+   * @returns {Promise<void>}
+   */
+  async function advanceLifecycleNow() {
+    await organizerStore.advanceLifecycle({ now: clock(), closeDrainMs });
+  }
 
   /**
    * @param {HttpRouteContext} ctx
@@ -147,18 +183,15 @@ function createReservationRoutes(dependencies) {
   }
 
   /**
-   * Validates reservation form input. `requireFuture` additionally requires the
-   * start to be in the future (enforced at submit).
+   * Validates the scheduling fields (start, end, requested seats) shared by
+   * reservations and change requests: parseable times, end after start, within
+   * the maximum duration, optionally a future start, and a seat count in range.
    *
    * @param {URLSearchParams} form
    * @param {{requireFuture: boolean, now: number}} options
-   * @returns {{ok: true, parsed: {eventName: string, description: string, visibility: "public" | "unlisted", startsAtMs: number, endsAtMs: number, requestedSeats: number}} | {ok: false, errorKey: string}}
+   * @returns {{ok: true, startsAtMs: number, endsAtMs: number, requestedSeats: number} | {ok: false, errorKey: string}}
    */
-  function validateReservation(form, options) {
-    const eventName = (form.get("eventName") || "").trim();
-    if (eventName.length < 1 || eventName.length > MAX_EVENT_NAME_LENGTH) {
-      return { ok: false, errorKey: "hosted_reservation_error_name" };
-    }
+  function validateScheduleFields(form, options) {
     const startsAtMs = parseDateTimeLocal(form.get("startsAt"), offsetMinutes);
     const endsAtMs = parseDateTimeLocal(form.get("endsAt"), offsetMinutes);
     if (startsAtMs === null || endsAtMs === null) {
@@ -182,6 +215,24 @@ function createReservationRoutes(dependencies) {
     ) {
       return { ok: false, errorKey: "hosted_reservation_error_seats" };
     }
+    return { ok: true, startsAtMs, endsAtMs, requestedSeats };
+  }
+
+  /**
+   * Validates reservation form input. `requireFuture` additionally requires the
+   * start to be in the future (enforced at submit).
+   *
+   * @param {URLSearchParams} form
+   * @param {{requireFuture: boolean, now: number}} options
+   * @returns {{ok: true, parsed: {eventName: string, description: string, visibility: "public" | "unlisted", startsAtMs: number, endsAtMs: number, requestedSeats: number}} | {ok: false, errorKey: string}}
+   */
+  function validateReservation(form, options) {
+    const eventName = (form.get("eventName") || "").trim();
+    if (eventName.length < 1 || eventName.length > MAX_EVENT_NAME_LENGTH) {
+      return { ok: false, errorKey: "hosted_reservation_error_name" };
+    }
+    const schedule = validateScheduleFields(form, options);
+    if (!schedule.ok) return schedule;
     const description = (form.get("description") || "").trim();
     if (description.length > MAX_DESCRIPTION_LENGTH) {
       return { ok: false, errorKey: "hosted_reservation_error_description" };
@@ -192,9 +243,30 @@ function createReservationRoutes(dependencies) {
         eventName,
         description,
         visibility: form.get("visibility") === "public" ? "public" : "unlisted",
-        startsAtMs,
-        endsAtMs,
-        requestedSeats,
+        startsAtMs: schedule.startsAtMs,
+        endsAtMs: schedule.endsAtMs,
+        requestedSeats: schedule.requestedSeats,
+      },
+    };
+  }
+
+  /**
+   * Validates a Change Request proposal (new start/end/seats), reusing the
+   * shared scheduling rules and always requiring a future start.
+   *
+   * @param {URLSearchParams} form
+   * @param {number} now
+   * @returns {{ok: true, parsed: {proposedStartsAtMs: number, proposedEndsAtMs: number, proposedSeats: number}} | {ok: false, errorKey: string}}
+   */
+  function validateChange(form, now) {
+    const schedule = validateScheduleFields(form, { requireFuture: true, now });
+    if (!schedule.ok) return schedule;
+    return {
+      ok: true,
+      parsed: {
+        proposedStartsAtMs: schedule.startsAtMs,
+        proposedEndsAtMs: schedule.endsAtMs,
+        proposedSeats: schedule.requestedSeats,
       },
     };
   }
@@ -363,18 +435,25 @@ function createReservationRoutes(dependencies) {
    */
   function serveOrganizerReservation(ctx) {
     if (ctx.request.method === "POST") return handleUpdateReservation(ctx);
-    if (ctx.request.method === "GET") {
-      const organizerId = ctx.params.organizerId || "";
-      const account = requireMember(ctx, organizerId);
-      if (!account) return;
-      const reservation = loadOwnedReservation(
-        organizerId,
-        ctx.params.reservationId || "",
-      );
-      renderReservationDetail(ctx, organizerId, reservation, 200, {});
-      return;
-    }
+    if (ctx.request.method === "GET") return handleReservationDetailGet(ctx);
     throw new BoundaryError(405, "method_not_allowed");
+  }
+
+  /**
+   * @param {HttpRouteContext} ctx
+   * @returns {Promise<void>}
+   */
+  async function handleReservationDetailGet(ctx) {
+    const organizerId = ctx.params.organizerId || "";
+    const account = requireMember(ctx, organizerId);
+    if (!account) return;
+    const reservation = loadOwnedReservation(
+      organizerId,
+      ctx.params.reservationId || "",
+    );
+    // Advance the durable lifecycle so the displayed status is authoritative.
+    await advanceLifecycleNow();
+    renderReservationDetail(ctx, organizerId, reservation, 200, {});
   }
 
   /**
@@ -396,6 +475,39 @@ function createReservationRoutes(dependencies) {
     const event = reservation.eventId
       ? organizerStore.getEventById(reservation.eventId)
       : null;
+    const session = organizerStore.getBoardSessionForReservation(
+      reservation.reservationId,
+    );
+    const now = clock();
+    // A future (still scheduled) approved event can be amended or cancelled.
+    const isApprovedScheduled =
+      reservation.status === "approved" &&
+      !!session &&
+      session.status === "scheduled" &&
+      now < session.startsAtMs;
+    const pendingChange = organizerStore.getPendingChangeRequestForReservation(
+      reservation.reservationId,
+    );
+    /** @param {import("../organizers/store.mjs").StoredChangeRequest} request */
+    const proposedSummary = (request) =>
+      `${formatTimestamp(request.proposedStartsAtMs ?? reservation.startsAtMs)} → ${formatTimestamp(request.proposedEndsAtMs ?? reservation.endsAtMs)} · ${request.proposedSeats ?? reservation.requestedSeats}`;
+    const changeHistory = organizerStore
+      .listChangeRequestsForReservation(reservation.reservationId)
+      .map((request) => ({
+        kindLabel: translate(
+          template,
+          ctx,
+          CHANGE_KIND_LABEL_KEYS[request.kind],
+        ),
+        statusLabel: translate(
+          template,
+          ctx,
+          CHANGE_STATUS_LABEL_KEYS[request.status],
+        ),
+        createdAt: formatTimestamp(request.createdAtMs),
+        proposedSummary:
+          request.kind === "amend" ? proposedSummary(request) : undefined,
+      }));
     template.serveWithStatus(ctx.request, ctx.response, statusCode, {
       hostedOrganizerId: organizerId,
       hostedReservationId: reservation.reservationId,
@@ -411,7 +523,25 @@ function createReservationRoutes(dependencies) {
       hostedReservationIsApproved: reservation.status === "approved",
       hostedReservationIsRejected: reservation.status === "rejected",
       hostedReservationCancellable:
-        reservation.status === "draft" || reservation.status === "submitted",
+        reservation.status === "draft" ||
+        reservation.status === "submitted" ||
+        isApprovedScheduled,
+      hostedReservationLifecycleLabel: session
+        ? translate(template, ctx, SESSION_STATUS_LABEL_KEYS[session.status])
+        : undefined,
+      hostedReservationCanRequestChange: isApprovedScheduled && !pendingChange,
+      hostedReservationPendingChange: pendingChange
+        ? {
+            statusLabel: translate(
+              template,
+              ctx,
+              CHANGE_STATUS_LABEL_KEYS[pendingChange.status],
+            ),
+            summary: proposedSummary(pendingChange),
+          }
+        : undefined,
+      hostedReservationChangeHistory: changeHistory,
+      hostedReservationHasChangeHistory: changeHistory.length > 0,
       hostedReservationVisibilityPublic: reservation.visibility === "public",
       hostedReservationStartValue: toDateTimeLocal(
         reservation.startsAtMs,
@@ -587,16 +717,110 @@ function createReservationRoutes(dependencies) {
       });
       return;
     }
-    const result = await organizerStore.cancelReservation({
-      reservationId: reservation.reservationId,
-      actorAccountId: account.accountId,
-    });
-    if (!result.ok) {
-      renderReservationDetail(ctx, organizerId, reservation, 409, {
-        errorKey: "hosted_reservation_error_not_cancellable",
+    // Approved (future) events are cancelled through the lifecycle-aware path,
+    // which releases capacity; draft/submitted are simple withdrawals. Advance
+    // first so a just-started event is correctly refused.
+    if (reservation.status === "approved") {
+      await advanceLifecycleNow();
+      const result = await organizerStore.cancelApprovedEvent({
+        reservationId: reservation.reservationId,
+        organizerId,
+        actorAccountId: account.accountId,
+        now: clock(),
+      });
+      if (!result.ok) {
+        renderReservationDetail(ctx, organizerId, reservation, 409, {
+          errorKey:
+            result.reason === "not_future"
+              ? "hosted_change_error_not_future"
+              : "hosted_reservation_error_not_cancellable",
+        });
+        return;
+      }
+      logger.info("hosted.event_cancelled", {
+        organizer_id: organizerId,
+        reservation_id: reservation.reservationId,
+      });
+    } else {
+      const result = await organizerStore.cancelReservation({
+        reservationId: reservation.reservationId,
+        actorAccountId: account.accountId,
+      });
+      if (!result.ok) {
+        renderReservationDetail(ctx, organizerId, reservation, 409, {
+          errorKey: "hosted_reservation_error_not_cancellable",
+        });
+        return;
+      }
+    }
+    seeOther(
+      ctx,
+      publicPath(
+        config,
+        `/organizers/${organizerId}/reservations/${reservation.reservationId}`,
+      ),
+    );
+  }
+
+  /**
+   * Submits an amend Reservation Change Request for an approved, future event.
+   *
+   * @param {HttpRouteContext} ctx
+   * @returns {Promise<void>}
+   */
+  async function serveSubmitChangeRequest(ctx) {
+    if (ctx.request.method !== "POST") {
+      throw new BoundaryError(405, "method_not_allowed");
+    }
+    const organizerId = ctx.params.organizerId || "";
+    const account = requireMember(ctx, organizerId);
+    if (!account) return;
+    const reservation = loadOwnedReservation(
+      organizerId,
+      ctx.params.reservationId || "",
+    );
+    const form = await readFormBody(ctx.request);
+    if (!requestHasValidCsrf(ctx.request, form)) {
+      renderReservationDetail(ctx, organizerId, reservation, 403, {
+        errorKey: "hosted_error_csrf",
       });
       return;
     }
+    if (!withinRateLimit(ctx, account.accountId)) {
+      renderReservationDetail(ctx, organizerId, reservation, 429, {
+        errorKey: "hosted_error_rate_limited",
+      });
+      return;
+    }
+    await advanceLifecycleNow();
+    const validation = validateChange(form, clock());
+    if (!validation.ok) {
+      renderReservationDetail(ctx, organizerId, reservation, 400, {
+        errorKey: validation.errorKey,
+      });
+      return;
+    }
+    const result = await organizerStore.submitChangeRequest({
+      reservationId: reservation.reservationId,
+      organizerId,
+      ...validation.parsed,
+      requestedByAccountId: account.accountId,
+    });
+    if (!result.ok) {
+      const errorKey =
+        result.reason === "already_pending"
+          ? "hosted_change_error_pending"
+          : result.reason === "not_scheduled"
+            ? "hosted_change_error_not_scheduled"
+            : "hosted_change_error_not_approved";
+      renderReservationDetail(ctx, organizerId, reservation, 409, { errorKey });
+      return;
+    }
+    logger.info("hosted.change_request_submitted", {
+      organizer_id: organizerId,
+      reservation_id: reservation.reservationId,
+      change_request_id: result.changeRequest.changeRequestId,
+    });
     seeOther(
       ctx,
       publicPath(
@@ -808,15 +1032,246 @@ function createReservationRoutes(dependencies) {
     return handleDecision(ctx, "reject");
   }
 
+  // --- operator change request review --------------------------------------
+
+  /**
+   * @param {HttpRouteContext} ctx
+   * @returns {void | Promise<void>}
+   */
+  function serveOperatorChanges(ctx) {
+    if (ctx.request.method !== "GET") {
+      throw new BoundaryError(405, "method_not_allowed");
+    }
+    const operator = requireOperator(ctx);
+    if (!operator) return;
+    return renderOperatorChangeQueue(ctx);
+  }
+
+  /**
+   * @param {HttpRouteContext} ctx
+   * @returns {Promise<void>}
+   */
+  async function renderOperatorChangeQueue(ctx) {
+    await advanceLifecycleNow();
+    const template = templates.operatorChanges;
+    const pending = organizerStore
+      .listPendingChangeRequests()
+      .map((request) => {
+        const reservation = organizerStore.getReservationById(
+          request.reservationId,
+        );
+        const organizer = reservation
+          ? organizerStore.getOrganizerById(reservation.organizerId)
+          : null;
+        return {
+          changeRequestId: request.changeRequestId,
+          organizerName: organizer ? organizer.name : "",
+          eventName: reservation ? reservation.eventName : "",
+          proposedStart: formatTimestamp(request.proposedStartsAtMs ?? 0),
+          proposedSeats: request.proposedSeats ?? 0,
+        };
+      });
+    template.serveWithStatus(ctx.request, ctx.response, 200, {
+      hostedOperatorChanges: pending,
+      hostedOperatorHasChanges: pending.length > 0,
+    });
+  }
+
+  /**
+   * @param {HttpRouteContext} ctx
+   * @returns {void | Promise<void>}
+   */
+  function serveOperatorChange(ctx) {
+    if (ctx.request.method !== "GET") {
+      throw new BoundaryError(405, "method_not_allowed");
+    }
+    const operator = requireOperator(ctx);
+    if (!operator) return;
+    return renderOperatorChangeDetailGet(ctx);
+  }
+
+  /**
+   * @param {HttpRouteContext} ctx
+   * @returns {Promise<void>}
+   */
+  async function renderOperatorChangeDetailGet(ctx) {
+    await advanceLifecycleNow();
+    const request = organizerStore.getChangeRequestById(
+      ctx.params.changeRequestId || "",
+    );
+    if (!request) throw new BoundaryError(404, "change_request_not_found");
+    renderOperatorChange(ctx, request, 200, {});
+  }
+
+  /**
+   * @param {HttpRouteContext} ctx
+   * @param {import("../organizers/store.mjs").StoredChangeRequest} request
+   * @param {number} statusCode
+   * @param {{noticeKey?: string}} state
+   * @returns {void}
+   */
+  function renderOperatorChange(ctx, request, statusCode, state) {
+    const template = templates.operatorChange;
+    const reservation = organizerStore.getReservationById(
+      request.reservationId,
+    );
+    const organizer = reservation
+      ? organizerStore.getOrganizerById(reservation.organizerId)
+      : null;
+    const impact =
+      request.status === "pending" && request.kind === "amend"
+        ? organizerStore.changeRequestCapacityImpact({
+            changeRequestId: request.changeRequestId,
+            ...capacityOptions(),
+          })
+        : null;
+    const currentStart = reservation ? reservation.startsAtMs : 0;
+    const currentEnd = reservation ? reservation.endsAtMs : 0;
+    const currentSeats = reservation ? reservation.requestedSeats : 0;
+    template.serveWithStatus(ctx.request, ctx.response, statusCode, {
+      hostedChangeRequestId: request.changeRequestId,
+      hostedChangeOrganizerName: organizer ? organizer.name : "",
+      hostedChangeEventName: reservation ? reservation.eventName : "",
+      hostedChangeKindLabel: translate(
+        template,
+        ctx,
+        CHANGE_KIND_LABEL_KEYS[request.kind],
+      ),
+      hostedChangeStatusLabel: translate(
+        template,
+        ctx,
+        CHANGE_STATUS_LABEL_KEYS[request.status],
+      ),
+      hostedChangeIsPending: request.status === "pending",
+      hostedChangeCurrentStart: formatTimestamp(currentStart),
+      hostedChangeCurrentEnd: formatTimestamp(currentEnd),
+      hostedChangeCurrentSeats: currentSeats,
+      hostedChangeProposedStart: formatTimestamp(
+        request.proposedStartsAtMs ?? currentStart,
+      ),
+      hostedChangeProposedEnd: formatTimestamp(
+        request.proposedEndsAtMs ?? currentEnd,
+      ),
+      hostedChangeProposedSeats: request.proposedSeats ?? currentSeats,
+      hostedCapacity: impact
+        ? {
+            sessions: impact.maxSessions,
+            sessionLimit: impact.sessionLimit,
+            seats: impact.maxSeats,
+            seatLimit: impact.seatLimit,
+            wouldExceed: impact.wouldExceed,
+          }
+        : undefined,
+      hostedOperatorChangeNotice: state.noticeKey
+        ? translate(template, ctx, state.noticeKey)
+        : undefined,
+      csrfToken: ensureCsrfToken(ctx),
+    });
+  }
+
+  /**
+   * @param {HttpRouteContext} ctx
+   * @param {"approve" | "reject"} decision
+   * @returns {Promise<void>}
+   */
+  async function handleChangeDecision(ctx, decision) {
+    if (ctx.request.method !== "POST") {
+      throw new BoundaryError(405, "method_not_allowed");
+    }
+    const operator = requireOperator(ctx);
+    if (!operator) return;
+    const request = organizerStore.getChangeRequestById(
+      ctx.params.changeRequestId || "",
+    );
+    if (!request) throw new BoundaryError(404, "change_request_not_found");
+    const form = await readFormBody(ctx.request);
+    if (!requestHasValidCsrf(ctx.request, form)) {
+      renderOperatorChange(ctx, request, 403, {
+        noticeKey: "hosted_error_csrf",
+      });
+      return;
+    }
+    await advanceLifecycleNow();
+    if (decision === "approve") {
+      const result = await organizerStore.approveChangeRequest({
+        changeRequestId: request.changeRequestId,
+        operatorAccountId: operator.accountId,
+        now: clock(),
+        ...capacityOptions(),
+      });
+      if (!result.ok) {
+        const current =
+          organizerStore.getChangeRequestById(request.changeRequestId) ||
+          request;
+        const noticeKey =
+          result.reason === "capacity"
+            ? "hosted_operator_reservation_capacity_conflict"
+            : result.reason === "past_start"
+              ? "hosted_operator_reservation_past_start"
+              : "hosted_change_error_not_applicable";
+        renderOperatorChange(ctx, current, 409, { noticeKey });
+        return;
+      }
+      logger.info("hosted.change_request_applied", {
+        operator_account_id: operator.accountId,
+        change_request_id: request.changeRequestId,
+      });
+    } else {
+      const result = await organizerStore.rejectChangeRequest({
+        changeRequestId: request.changeRequestId,
+        operatorAccountId: operator.accountId,
+        note: (form.get("note") || "").slice(0, MAX_OPERATOR_NOTE_LENGTH),
+      });
+      if (!result.ok) {
+        const current =
+          organizerStore.getChangeRequestById(request.changeRequestId) ||
+          request;
+        renderOperatorChange(ctx, current, 409, {
+          noticeKey: "hosted_change_error_not_applicable",
+        });
+        return;
+      }
+      logger.info("hosted.change_request_rejected", {
+        operator_account_id: operator.accountId,
+        change_request_id: request.changeRequestId,
+      });
+    }
+    seeOther(
+      ctx,
+      publicPath(config, `/operator/changes/${request.changeRequestId}`),
+    );
+  }
+
+  /**
+   * @param {HttpRouteContext} ctx
+   * @returns {Promise<void>}
+   */
+  function serveOperatorApproveChange(ctx) {
+    return handleChangeDecision(ctx, "approve");
+  }
+
+  /**
+   * @param {HttpRouteContext} ctx
+   * @returns {Promise<void>}
+   */
+  function serveOperatorRejectChange(ctx) {
+    return handleChangeDecision(ctx, "reject");
+  }
+
   return {
     serveOrganizerReservations,
     serveOrganizerReservation,
     serveSubmitReservation,
     serveCancelReservation,
+    serveSubmitChangeRequest,
     serveOperatorReservations,
     serveOperatorReservation,
     serveOperatorApproveReservation,
     serveOperatorRejectReservation,
+    serveOperatorChanges,
+    serveOperatorChange,
+    serveOperatorApproveChange,
+    serveOperatorRejectChange,
   };
 }
 

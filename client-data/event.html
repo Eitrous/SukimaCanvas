@@ -63,7 +63,9 @@
           <dt>{{hostedTranslations.hosted_event_ends_label}}</dt>
           <dd>{{hostedEventEndsAt}}</dd>
         </dl>
-        {{#if hostedEventEnded}}
+        {{#if hostedEventCancelled}}
+        <p class="hosted-form-error" role="status">{{hostedTranslations.hosted_event_cancelled_note}}</p>
+        {{else if hostedEventEnded}}
         <p class="hosted-account-note">{{hostedTranslations.hosted_event_ended_note}}</p>
         {{else}}
         <p class="hosted-account-note">{{hostedTranslations.hosted_event_access_note}}</p>

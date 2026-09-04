@@ -278,8 +278,14 @@ test("the event page hides capacity, participant, and admin data", async () => {
     assert.equal(page.statusCode, 200);
     assert.match(page.body, /Careful Event/);
     assert.match(page.body, /Aurora Collective/); // organizer display name
-    // No capacity, seat counts, participant lists, or owner emails leak here.
-    assert.doesNotMatch(page.body, /37/);
+    // No capacity, seat counts, participant lists, or admin emails leak here.
+    // The seat count is checked after masking the displayed timestamps, whose
+    // minute field would otherwise collide with a two-digit seat number.
+    const withoutTimes = page.body.replace(
+      /\d{4}-\d{2}-\d{2} \d{2}:\d{2} \(UTC[^)]*\)/g,
+      "",
+    );
+    assert.doesNotMatch(withoutTimes, /\b37\b/);
     assert.doesNotMatch(page.body, /seat/i);
     assert.doesNotMatch(page.body, /capacity/i);
     assert.doesNotMatch(page.body, /owner-/);

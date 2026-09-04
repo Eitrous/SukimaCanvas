@@ -131,6 +131,7 @@ function eventLifecycleState(event, now) {
  *   visibility: "public" | "unlisted",
  *   tagline: string,
  *   coverAssetId: string | null,
+ *   status: "active" | "cancelled",
  *   startsAtMs: number,
  *   endsAtMs: number,
  *   createdAtMs: number,
@@ -140,24 +141,61 @@ function eventLifecycleState(event, now) {
  * @typedef {"scheduled" | "open" | "ended"} EventLifecycleState
  */
 /**
+ * The authoritative Board Session lifecycle advanced by durable background work.
+ * `scheduled` before the event's start, `open` while it runs, `closing` while
+ * accepted writes drain, `closed` once the session is sealed, and `cancelled`
+ * when a future event is withdrawn. `closed` and `cancelled` are terminal.
+ *
+ * @typedef {"scheduled" | "open" | "closing" | "closed" | "cancelled"} BoardSessionStatus
+ */
+/**
  * @typedef {{
  *   boardSessionId: string,
  *   eventId: string,
  *   reservationId: string,
  *   organizerId: string,
- *   status: "scheduled",
+ *   status: BoardSessionStatus,
  *   seats: number,
+ *   startsAtMs: number,
+ *   endsAtMs: number,
  *   windowStartMs: number,
  *   windowEndMs: number,
  *   createdAtMs: number,
+ *   openedAtMs: number | null,
+ *   closingAtMs: number | null,
+ *   closedAtMs: number | null,
+ *   cancelledAtMs: number | null,
  * }} StoredBoardSession
+ */
+/**
+ * @typedef {"amend" | "cancel"} ChangeRequestKind
+ */
+/**
+ * @typedef {"pending" | "applied" | "rejected"} ChangeRequestStatus
+ */
+/**
+ * @typedef {{
+ *   changeRequestId: string,
+ *   reservationId: string,
+ *   organizerId: string,
+ *   kind: ChangeRequestKind,
+ *   proposedStartsAtMs: number | null,
+ *   proposedEndsAtMs: number | null,
+ *   proposedSeats: number | null,
+ *   status: ChangeRequestStatus,
+ *   requestedByAccountId: string,
+ *   createdAtMs: number,
+ *   decidedAtMs: number | null,
+ *   decidedByAccountId: string | null,
+ *   operatorNote: string | null,
+ * }} StoredChangeRequest
  */
 /**
  * @typedef {{
  *   recordId: string,
  *   createdAtMs: number,
  *   actorAccountId: string,
- *   actorKind: "account" | "operator",
+ *   actorKind: "account" | "operator" | "system",
  *   action: string,
  *   subjectType: string,
  *   subjectId: string,
@@ -251,6 +289,8 @@ function createFileOrganizerStore(options) {
   const eventIdsByPublicId = new Map();
   /** @type {Map<string, StoredBoardSession>} */
   const boardSessionsById = new Map();
+  /** @type {Map<string, StoredChangeRequest>} */
+  const changeRequestsById = new Map();
   /** @type {StoredAuditRecord[]} */
   const auditRecords = [];
   let loaded = false;
@@ -263,6 +303,10 @@ function createFileOrganizerStore(options) {
   const RESERVATIONS_FILE = path.join(dataDir, "reservations.json");
   const EVENTS_FILE = path.join(dataDir, "events.json");
   const BOARD_SESSIONS_FILE = path.join(dataDir, "board_sessions.json");
+  const CHANGE_REQUESTS_FILE = path.join(
+    dataDir,
+    "reservation_change_requests.json",
+  );
   const AUDIT_FILE = path.join(dataDir, "change_audit.json");
 
   /**
@@ -272,6 +316,28 @@ function createFileOrganizerStore(options) {
    */
   function roleKey(organizerId, accountId) {
     return `${organizerId}:${accountId}`;
+  }
+
+  /**
+   * Backfills the lifecycle fields added in issue 08 onto a Board Session loaded
+   * from an older on-disk record, so state loads without a migration. Runs after
+   * events are indexed, so the event supplies the authoritative start/end.
+   *
+   * @param {StoredBoardSession} session
+   * @returns {void}
+   */
+  function hydrateBoardSession(session) {
+    const event = eventsById.get(session.eventId);
+    if (typeof session.startsAtMs !== "number") {
+      session.startsAtMs = event ? event.startsAtMs : session.windowStartMs;
+    }
+    if (typeof session.endsAtMs !== "number") {
+      session.endsAtMs = event ? event.endsAtMs : session.windowEndMs;
+    }
+    if (session.openedAtMs === undefined) session.openedAtMs = null;
+    if (session.closingAtMs === undefined) session.closingAtMs = null;
+    if (session.closedAtMs === undefined) session.closedAtMs = null;
+    if (session.cancelledAtMs === undefined) session.cancelledAtMs = null;
   }
 
   function ensureLoaded() {
@@ -319,10 +385,11 @@ function createFileOrganizerStore(options) {
     }
     const events = readStoreFile(EVENTS_FILE, { events: [] });
     for (const event of /** @type {StoredEvent[]} */ (events.events || [])) {
-      // Display fields were added after the first events were minted; default
-      // them so older records load without a migration.
+      // Display and status fields were added after the first events were minted;
+      // default them so older records load without a migration.
       if (typeof event.tagline !== "string") event.tagline = "";
       if (event.coverAssetId === undefined) event.coverAssetId = null;
+      if (event.status !== "cancelled") event.status = "active";
       eventsById.set(event.eventId, event);
       eventIdsByPublicId.set(event.publicId, event.eventId);
     }
@@ -332,7 +399,16 @@ function createFileOrganizerStore(options) {
     for (const boardSession of /** @type {StoredBoardSession[]} */ (
       boardSessions.boardSessions || []
     )) {
+      hydrateBoardSession(boardSession);
       boardSessionsById.set(boardSession.boardSessionId, boardSession);
+    }
+    const changeRequests = readStoreFile(CHANGE_REQUESTS_FILE, {
+      changeRequests: [],
+    });
+    for (const changeRequest of /** @type {StoredChangeRequest[]} */ (
+      changeRequests.changeRequests || []
+    )) {
+      changeRequestsById.set(changeRequest.changeRequestId, changeRequest);
     }
     const audit = readStoreFile(AUDIT_FILE, { records: [] });
     for (const record of /** @type {StoredAuditRecord[]} */ (
@@ -426,6 +502,10 @@ function createFileOrganizerStore(options) {
       version: STORE_FORMAT_VERSION,
       boardSessions: [...boardSessionsById.values()],
     });
+    await writeStoreFile(CHANGE_REQUESTS_FILE, {
+      version: STORE_FORMAT_VERSION,
+      changeRequests: [...changeRequestsById.values()],
+    });
     await writeStoreFile(AUDIT_FILE, {
       version: STORE_FORMAT_VERSION,
       records: auditRecords,
@@ -462,7 +542,7 @@ function createFileOrganizerStore(options) {
    *
    * @param {{
    *   actorAccountId: string,
-   *   actorKind: "account" | "operator",
+   *   actorKind: "account" | "operator" | "system",
    *   action: string,
    *   subjectType: string,
    *   subjectId: string,
@@ -1308,16 +1388,25 @@ function createFileOrganizerStore(options) {
 
   /**
    * Live Capacity Allocations: the windows and seats held by every Board
-   * Session (each backs one approved reservation).
+   * Session that still commits capacity. A cancelled session has released its
+   * future capacity and no longer counts; `excludeBoardSessionId` drops the
+   * session being re-planned so an in-place change is measured against the rest.
    *
+   * @param {string} [excludeBoardSessionId]
    * @returns {{windowStartMs: number, windowEndMs: number, seats: number}[]}
    */
-  function activeAllocations() {
-    return [...boardSessionsById.values()].map((session) => ({
-      windowStartMs: session.windowStartMs,
-      windowEndMs: session.windowEndMs,
-      seats: session.seats,
-    }));
+  function activeAllocations(excludeBoardSessionId) {
+    return [...boardSessionsById.values()]
+      .filter(
+        (session) =>
+          session.status !== "cancelled" &&
+          session.boardSessionId !== excludeBoardSessionId,
+      )
+      .map((session) => ({
+        windowStartMs: session.windowStartMs,
+        windowEndMs: session.windowEndMs,
+        seats: session.seats,
+      }));
   }
 
   /**
@@ -1403,6 +1492,7 @@ function createFileOrganizerStore(options) {
       visibility: reservation.visibility,
       tagline: "",
       coverAssetId: null,
+      status: "active",
       startsAtMs: reservation.startsAtMs,
       endsAtMs: reservation.endsAtMs,
       createdAtMs: now,
@@ -1415,9 +1505,15 @@ function createFileOrganizerStore(options) {
       organizerId: reservation.organizerId,
       status: "scheduled",
       seats: reservation.requestedSeats,
+      startsAtMs: reservation.startsAtMs,
+      endsAtMs: reservation.endsAtMs,
       windowStartMs: window.windowStartMs,
       windowEndMs: window.windowEndMs,
       createdAtMs: now,
+      openedAtMs: null,
+      closingAtMs: null,
+      closedAtMs: null,
+      cancelledAtMs: null,
     });
     reservation.status = "approved";
     reservation.decidedAtMs = now;
@@ -1465,6 +1561,446 @@ function createFileOrganizerStore(options) {
     });
     await enqueueWrite(persistNow);
     return { ok: true };
+  }
+
+  // --- board session lifecycle & reservation change requests ---------------
+
+  /**
+   * @param {string} reservationId
+   * @returns {StoredBoardSession | null}
+   */
+  function boardSessionByReservationId(reservationId) {
+    for (const session of boardSessionsById.values()) {
+      if (session.reservationId === reservationId) return session;
+    }
+    return null;
+  }
+
+  /**
+   * The Board Session backing an approved reservation, or null.
+   *
+   * @param {string} reservationId
+   * @returns {StoredBoardSession | null}
+   */
+  function getBoardSessionForReservation(reservationId) {
+    ensureLoaded();
+    return boardSessionByReservationId(String(reservationId || ""));
+  }
+
+  /**
+   * Durable, idempotent lifecycle advancement — the authoritative background
+   * work that moves Board Sessions forward, not an in-process timer. Each
+   * non-terminal session is advanced to the state its own start/end times imply
+   * at `now`: `scheduled → open` at start, `open → closing` at end, and
+   * `closing → closed` after the drain window. Every transition is guarded by
+   * the current status, so running the same `now` twice (or catching up after a
+   * restart that skipped the exact moment) never double-transitions or produces
+   * a contradictory state. Returns the transitions applied so callers can log
+   * observable lifecycle progress.
+   *
+   * @param {{now: number, closeDrainMs?: number}} input
+   * @returns {Promise<{boardSessionId: string, from: BoardSessionStatus, to: BoardSessionStatus}[]>}
+   */
+  async function advanceLifecycle(input) {
+    ensureLoaded();
+    const now = input.now;
+    const closeDrainMs =
+      typeof input.closeDrainMs === "number" &&
+      Number.isFinite(input.closeDrainMs)
+        ? Math.max(0, input.closeDrainMs)
+        : 0;
+    /** @type {{boardSessionId: string, from: BoardSessionStatus, to: BoardSessionStatus}[]} */
+    const transitions = [];
+    for (const session of boardSessionsById.values()) {
+      // Advance this session as far as `now` allows; the loop lets a long outage
+      // catch up through several boundaries in one pass.
+      while (true) {
+        const from = session.status;
+        /** @type {BoardSessionStatus | null} */
+        let to = null;
+        if (from === "scheduled" && now >= session.startsAtMs) to = "open";
+        else if (from === "open" && now >= session.endsAtMs) to = "closing";
+        else if (from === "closing" && now >= session.endsAtMs + closeDrainMs) {
+          to = "closed";
+        }
+        if (!to) break;
+        session.status = to;
+        if (to === "open") session.openedAtMs = now;
+        else if (to === "closing") session.closingAtMs = now;
+        else if (to === "closed") session.closedAtMs = now;
+        recordAudit({
+          actorAccountId: "",
+          actorKind: "system",
+          action: `board_session.${to}`,
+          subjectType: "board_session",
+          subjectId: session.boardSessionId,
+          organizerId: session.organizerId,
+        });
+        transitions.push({ boardSessionId: session.boardSessionId, from, to });
+      }
+    }
+    if (transitions.length > 0) await enqueueWrite(persistNow);
+    return transitions;
+  }
+
+  /**
+   * Submits an amend Reservation Change Request (reschedule/extend/capacity) for
+   * an approved reservation whose Board Session is still scheduled. Only one
+   * pending request may exist at a time. The proposal is not applied until an
+   * operator approves it (capacity is re-checked then).
+   *
+   * @param {{
+   *   reservationId: string,
+   *   organizerId: string,
+   *   proposedStartsAtMs: number,
+   *   proposedEndsAtMs: number,
+   *   proposedSeats: number,
+   *   requestedByAccountId: string,
+   * }} input
+   * @returns {Promise<{ok: true, changeRequest: StoredChangeRequest} | {ok: false, reason: "not_found" | "not_approved" | "not_scheduled" | "already_pending"}>}
+   */
+  async function submitChangeRequest(input) {
+    ensureLoaded();
+    const reservation = reservationsById.get(String(input.reservationId || ""));
+    if (!reservation || reservation.organizerId !== input.organizerId) {
+      return { ok: false, reason: "not_found" };
+    }
+    if (reservation.status !== "approved") {
+      return { ok: false, reason: "not_approved" };
+    }
+    const session = boardSessionByReservationId(reservation.reservationId);
+    if (!session || session.status !== "scheduled") {
+      return { ok: false, reason: "not_scheduled" };
+    }
+    for (const request of changeRequestsById.values()) {
+      if (
+        request.reservationId === reservation.reservationId &&
+        request.status === "pending"
+      ) {
+        return { ok: false, reason: "already_pending" };
+      }
+    }
+    /** @type {StoredChangeRequest} */
+    const changeRequest = {
+      changeRequestId: randomId(),
+      reservationId: reservation.reservationId,
+      organizerId: reservation.organizerId,
+      kind: "amend",
+      proposedStartsAtMs: integerOr(
+        input.proposedStartsAtMs,
+        reservation.startsAtMs,
+      ),
+      proposedEndsAtMs: integerOr(input.proposedEndsAtMs, reservation.endsAtMs),
+      proposedSeats: integerOr(input.proposedSeats, reservation.requestedSeats),
+      status: "pending",
+      requestedByAccountId: String(input.requestedByAccountId || ""),
+      createdAtMs: clock(),
+      decidedAtMs: null,
+      decidedByAccountId: null,
+      operatorNote: null,
+    };
+    changeRequestsById.set(changeRequest.changeRequestId, changeRequest);
+    recordAudit({
+      actorAccountId: changeRequest.requestedByAccountId,
+      actorKind: "account",
+      action: "change_request.submitted",
+      subjectType: "change_request",
+      subjectId: changeRequest.changeRequestId,
+      organizerId: reservation.organizerId,
+    });
+    await enqueueWrite(persistNow);
+    return { ok: true, changeRequest };
+  }
+
+  /**
+   * Peak Capacity Allocation impact if a pending amend were applied now, for the
+   * operator console — measured against every other live allocation with the
+   * reservation's current allocation excluded.
+   *
+   * @param {{changeRequestId: string, bufferMs: number, sessionLimit: number, seatLimit: number}} input
+   * @returns {{maxSessions: number, maxSeats: number, sessionLimit: number, seatLimit: number, wouldExceed: boolean} | null}
+   */
+  function changeRequestCapacityImpact(input) {
+    ensureLoaded();
+    const request = changeRequestsById.get(String(input.changeRequestId || ""));
+    if (!request || request.kind !== "amend") return null;
+    const reservation = reservationsById.get(request.reservationId);
+    const session = boardSessionByReservationId(request.reservationId);
+    if (!reservation || !session) return null;
+    const proposedStart = request.proposedStartsAtMs ?? reservation.startsAtMs;
+    const proposedEnd = request.proposedEndsAtMs ?? reservation.endsAtMs;
+    const proposedSeats = request.proposedSeats ?? reservation.requestedSeats;
+    const peak = computeCapacityPeak(
+      proposedStart - input.bufferMs,
+      proposedEnd + input.bufferMs,
+      proposedSeats,
+      activeAllocations(session.boardSessionId),
+    );
+    return {
+      maxSessions: peak.maxSessions,
+      maxSeats: peak.maxSeats,
+      sessionLimit: input.sessionLimit,
+      seatLimit: input.seatLimit,
+      wouldExceed:
+        peak.maxSessions > input.sessionLimit ||
+        peak.maxSeats > input.seatLimit,
+    };
+  }
+
+  /**
+   * Approves and applies a pending amend: re-runs the full overlapping capacity
+   * constraint with the reservation's own allocation excluded and, only if the
+   * proposal fits, atomically updates the reservation, event, and Board Session.
+   * The check-and-apply is synchronous, so concurrent approvals cannot oversell.
+   *
+   * @param {{changeRequestId: string, operatorAccountId: string, now: number, bufferMs: number, sessionLimit: number, seatLimit: number}} input
+   * @returns {Promise<{ok: true} | {ok: false, reason: "not_found" | "not_pending" | "not_applicable" | "past_start" | "capacity", maxSessions?: number, maxSeats?: number}>}
+   */
+  async function approveChangeRequest(input) {
+    ensureLoaded();
+    const request = changeRequestsById.get(String(input.changeRequestId || ""));
+    if (!request) return { ok: false, reason: "not_found" };
+    if (request.status !== "pending" || request.kind !== "amend") {
+      return { ok: false, reason: "not_pending" };
+    }
+    const reservation = reservationsById.get(request.reservationId);
+    const session = boardSessionByReservationId(request.reservationId);
+    const event =
+      reservation && reservation.eventId
+        ? eventsById.get(reservation.eventId)
+        : null;
+    if (
+      !reservation ||
+      !session ||
+      !event ||
+      reservation.status !== "approved" ||
+      session.status !== "scheduled"
+    ) {
+      return { ok: false, reason: "not_applicable" };
+    }
+    const proposedStart = request.proposedStartsAtMs ?? reservation.startsAtMs;
+    const proposedEnd = request.proposedEndsAtMs ?? reservation.endsAtMs;
+    const proposedSeats = request.proposedSeats ?? reservation.requestedSeats;
+    if (proposedStart <= input.now) return { ok: false, reason: "past_start" };
+    const windowStartMs = proposedStart - input.bufferMs;
+    const windowEndMs = proposedEnd + input.bufferMs;
+    const peak = computeCapacityPeak(
+      windowStartMs,
+      windowEndMs,
+      proposedSeats,
+      activeAllocations(session.boardSessionId),
+    );
+    if (
+      peak.maxSessions > input.sessionLimit ||
+      peak.maxSeats > input.seatLimit
+    ) {
+      return {
+        ok: false,
+        reason: "capacity",
+        maxSessions: peak.maxSessions,
+        maxSeats: peak.maxSeats,
+      };
+    }
+    const now = clock();
+    reservation.startsAtMs = proposedStart;
+    reservation.endsAtMs = proposedEnd;
+    reservation.requestedSeats = proposedSeats;
+    event.startsAtMs = proposedStart;
+    event.endsAtMs = proposedEnd;
+    session.startsAtMs = proposedStart;
+    session.endsAtMs = proposedEnd;
+    session.windowStartMs = windowStartMs;
+    session.windowEndMs = windowEndMs;
+    session.seats = proposedSeats;
+    request.status = "applied";
+    request.decidedAtMs = now;
+    request.decidedByAccountId = String(input.operatorAccountId || "");
+    recordAudit({
+      actorAccountId: String(input.operatorAccountId || ""),
+      actorKind: "operator",
+      action: "change_request.applied",
+      subjectType: "change_request",
+      subjectId: request.changeRequestId,
+      organizerId: reservation.organizerId,
+    });
+    await enqueueWrite(persistNow);
+    return { ok: true };
+  }
+
+  /**
+   * Rejects a pending amend with an operator-only note; nothing changes on the
+   * reservation, event, or Board Session.
+   *
+   * @param {{changeRequestId: string, operatorAccountId: string, note?: string}} input
+   * @returns {Promise<{ok: true} | {ok: false, reason: "not_found" | "not_pending"}>}
+   */
+  async function rejectChangeRequest(input) {
+    ensureLoaded();
+    const request = changeRequestsById.get(String(input.changeRequestId || ""));
+    if (!request) return { ok: false, reason: "not_found" };
+    if (request.status !== "pending" || request.kind !== "amend") {
+      return { ok: false, reason: "not_pending" };
+    }
+    request.status = "rejected";
+    request.decidedAtMs = clock();
+    request.decidedByAccountId = String(input.operatorAccountId || "");
+    request.operatorNote = clampString(
+      input.note || "",
+      MAX_OPERATOR_NOTE_LENGTH,
+    );
+    recordAudit({
+      actorAccountId: String(input.operatorAccountId || ""),
+      actorKind: "operator",
+      action: "change_request.rejected",
+      subjectType: "change_request",
+      subjectId: request.changeRequestId,
+      organizerId: request.organizerId,
+    });
+    await enqueueWrite(persistNow);
+    return { ok: true };
+  }
+
+  /**
+   * Cancels an approved, still-future Event directly (a capacity-releasing
+   * change that needs no operator approval): the reservation, event, and Board
+   * Session move to cancelled, releasing the future Capacity Allocation and
+   * blocking new entry, while every existing audit record is preserved. The
+   * cancellation is recorded as an applied cancel Change Request for the
+   * history.
+   *
+   * @param {{reservationId: string, organizerId: string, actorAccountId: string, now: number}} input
+   * @returns {Promise<{ok: true} | {ok: false, reason: "not_found" | "not_approved" | "not_future"}>}
+   */
+  async function cancelApprovedEvent(input) {
+    ensureLoaded();
+    const reservation = reservationsById.get(String(input.reservationId || ""));
+    if (!reservation || reservation.organizerId !== input.organizerId) {
+      return { ok: false, reason: "not_found" };
+    }
+    if (reservation.status !== "approved") {
+      return { ok: false, reason: "not_approved" };
+    }
+    const session = boardSessionByReservationId(reservation.reservationId);
+    const event = reservation.eventId
+      ? eventsById.get(reservation.eventId)
+      : null;
+    if (!session || !event) return { ok: false, reason: "not_found" };
+    // Only a future Event (still scheduled and not yet started) can be cancelled.
+    if (session.status !== "scheduled" || input.now >= session.startsAtMs) {
+      return { ok: false, reason: "not_future" };
+    }
+    const now = clock();
+    reservation.status = "cancelled";
+    event.status = "cancelled";
+    session.status = "cancelled";
+    session.cancelledAtMs = now;
+    // A still-pending amend can no longer apply to a cancelled reservation; it
+    // is rejected with the cancelling actor and its own audit record, like any
+    // other change-request decision.
+    const actorAccountId = String(input.actorAccountId || "");
+    for (const request of changeRequestsById.values()) {
+      if (
+        request.reservationId === reservation.reservationId &&
+        request.status === "pending"
+      ) {
+        request.status = "rejected";
+        request.decidedAtMs = now;
+        request.decidedByAccountId = actorAccountId;
+        recordAudit({
+          actorAccountId,
+          actorKind: "account",
+          action: "change_request.rejected",
+          subjectType: "change_request",
+          subjectId: request.changeRequestId,
+          organizerId: reservation.organizerId,
+        });
+      }
+    }
+    /** @type {StoredChangeRequest} */
+    const changeRequest = {
+      changeRequestId: randomId(),
+      reservationId: reservation.reservationId,
+      organizerId: reservation.organizerId,
+      kind: "cancel",
+      proposedStartsAtMs: null,
+      proposedEndsAtMs: null,
+      proposedSeats: null,
+      status: "applied",
+      requestedByAccountId: actorAccountId,
+      createdAtMs: now,
+      decidedAtMs: now,
+      decidedByAccountId: actorAccountId,
+      operatorNote: null,
+    };
+    changeRequestsById.set(changeRequest.changeRequestId, changeRequest);
+    recordAudit({
+      actorAccountId,
+      actorKind: "account",
+      action: "event.cancelled",
+      subjectType: "event",
+      subjectId: event.eventId,
+      organizerId: reservation.organizerId,
+    });
+    await enqueueWrite(persistNow);
+    return { ok: true };
+  }
+
+  /**
+   * @param {string} changeRequestId
+   * @returns {StoredChangeRequest | null}
+   */
+  function getChangeRequestById(changeRequestId) {
+    ensureLoaded();
+    if (typeof changeRequestId !== "string" || changeRequestId === "") {
+      return null;
+    }
+    return changeRequestsById.get(changeRequestId) || null;
+  }
+
+  /**
+   * Change Requests for a reservation, newest first.
+   *
+   * @param {string} reservationId
+   * @returns {StoredChangeRequest[]}
+   */
+  function listChangeRequestsForReservation(reservationId) {
+    ensureLoaded();
+    return [...changeRequestsById.values()]
+      .filter((request) => request.reservationId === reservationId)
+      .sort((left, right) => right.createdAtMs - left.createdAtMs);
+  }
+
+  /**
+   * The reservation's pending amend, or null.
+   *
+   * @param {string} reservationId
+   * @returns {StoredChangeRequest | null}
+   */
+  function getPendingChangeRequestForReservation(reservationId) {
+    ensureLoaded();
+    for (const request of changeRequestsById.values()) {
+      if (
+        request.reservationId === reservationId &&
+        request.status === "pending"
+      ) {
+        return request;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * The operator review queue: pending amend Change Requests, oldest first.
+   *
+   * @returns {StoredChangeRequest[]}
+   */
+  function listPendingChangeRequests() {
+    ensureLoaded();
+    return [...changeRequestsById.values()]
+      .filter(
+        (request) => request.status === "pending" && request.kind === "amend",
+      )
+      .sort((left, right) => left.createdAtMs - right.createdAtMs);
   }
 
   /**
@@ -1541,10 +2077,8 @@ function createFileOrganizerStore(options) {
 
   /**
    * Publicly discoverable events for the homepage: those set to public
-   * visibility whose board session has not yet ended, soonest first. Unlisted
-   * and ended events are never listed. (Cancellation of an approved event is
-   * owned by a later issue; when it lands, its terminal state joins "ended"
-   * here.)
+   * visibility whose board session has not yet ended, soonest first. Unlisted,
+   * ended, and cancelled events are never listed.
    *
    * @param {number} now
    * @returns {StoredEvent[]}
@@ -1555,6 +2089,7 @@ function createFileOrganizerStore(options) {
       .filter(
         (event) =>
           event.visibility === "public" &&
+          event.status !== "cancelled" &&
           eventLifecycleState(event, now) !== "ended",
       )
       .sort((left, right) => left.startsAtMs - right.startsAtMs);
@@ -1662,6 +2197,17 @@ function createFileOrganizerStore(options) {
     getReservationById,
     listReservationsForOrganizer,
     listSubmittedReservations,
+    getBoardSessionForReservation,
+    advanceLifecycle,
+    submitChangeRequest,
+    approveChangeRequest,
+    rejectChangeRequest,
+    changeRequestCapacityImpact,
+    cancelApprovedEvent,
+    getChangeRequestById,
+    listChangeRequestsForReservation,
+    getPendingChangeRequestForReservation,
+    listPendingChangeRequests,
     getEventById,
     getEventByPublicId,
     getEventForOrganizer,

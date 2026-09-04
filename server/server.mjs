@@ -24,9 +24,13 @@ import {
   serveCancelReservation,
   serveOperatorApplication,
   serveOperatorApproveApplication,
+  serveOperatorApproveChange,
   serveOperatorApproveReservation,
+  serveOperatorChange,
+  serveOperatorChanges,
   serveOperatorConsole,
   serveOperatorRejectApplication,
+  serveOperatorRejectChange,
   serveOperatorRejectReservation,
   serveOperatorReservation,
   serveOperatorReservations,
@@ -45,6 +49,7 @@ import {
   serveOrganizerReservations,
   serveRegister,
   serveReset,
+  serveSubmitChangeRequest,
   serveSubmitReservation,
   serveVerify,
 } from "./routes/hosted_pages.mjs";
@@ -168,6 +173,11 @@ function createWhiteboardHttpHandler() {
       "hosted_organizer_reservation_cancel",
     ),
     route(
+      "/organizers/{organizerId}/reservations/{reservationId}/change",
+      serveSubmitChangeRequest,
+      "hosted_organizer_reservation_change",
+    ),
+    route(
       "/organizers/{organizerId}/events/{eventId}",
       serveOrganizerEvent,
       "hosted_organizer_event",
@@ -197,6 +207,22 @@ function createWhiteboardHttpHandler() {
       "/operator/reservations/{reservationId}/reject",
       serveOperatorRejectReservation,
       "hosted_operator_reservation_reject",
+    ),
+    route("/operator/changes", serveOperatorChanges, "hosted_operator_changes"),
+    route(
+      "/operator/changes/{changeRequestId}",
+      serveOperatorChange,
+      "hosted_operator_change",
+    ),
+    route(
+      "/operator/changes/{changeRequestId}/approve",
+      serveOperatorApproveChange,
+      "hosted_operator_change_approve",
+    ),
+    route(
+      "/operator/changes/{changeRequestId}/reject",
+      serveOperatorRejectChange,
+      "hosted_operator_change_reject",
     ),
     route(
       "/operator/applications/{applicationId}",
