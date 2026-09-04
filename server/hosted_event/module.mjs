@@ -1,5 +1,5 @@
-import observability from "../observability/index.mjs";
 import { localizedHref, Template } from "../http/templating.mjs";
+import observability from "../observability/index.mjs";
 import { createHostedCaptcha } from "./accounts/captcha.mjs";
 import { createOutboxMailDelivery } from "./accounts/mail.mjs";
 import { createRateLimiter } from "./accounts/rate_limits.mjs";
@@ -10,6 +10,7 @@ import {
 import { createFileAccountStore } from "./accounts/store.mjs";
 import { createFileBrandAssetStore } from "./assets/store.mjs";
 import { createEventRoutes } from "./events/routes.mjs";
+import { createFileEventMembershipStore } from "./memberships/store.mjs";
 import { createOrganizerRoutes } from "./organizers/routes.mjs";
 import { createFileOrganizerStore } from "./organizers/store.mjs";
 import { createReservationRoutes } from "./reservations/routes.mjs";
@@ -154,6 +155,10 @@ function createHostedEventModule(config, paths) {
     clock,
   });
   const assetStore = createFileBrandAssetStore({
+    dataDir: config.HOSTED_DATA_DIR,
+    clock,
+  });
+  const membershipStore = createFileEventMembershipStore({
     dataDir: config.HOSTED_DATA_DIR,
     clock,
   });
@@ -319,6 +324,7 @@ function createHostedEventModule(config, paths) {
     clock,
     accountStore: store,
     organizerStore,
+    membershipStore,
     assetStore,
     limiter,
     templates: {
@@ -380,8 +386,12 @@ function createHostedEventModule(config, paths) {
     ...organizerRoutes,
     ...reservationRoutes,
     serveEventPage: eventRoutes.serveEventPage,
+    serveEventEnter: eventRoutes.serveEventEnter,
+    serveEventAnonymity: eventRoutes.serveEventAnonymity,
     serveBrandAsset: eventRoutes.serveBrandAsset,
     serveOrganizerEvent: eventRoutes.serveOrganizerEvent,
+    serveOrganizerEventAccessCode: eventRoutes.serveOrganizerEventAccessCode,
+    serveOrganizerEventEntryLock: eventRoutes.serveOrganizerEventEntryLock,
     serveOrganizerEventCover: eventRoutes.serveOrganizerEventCover,
   };
 }

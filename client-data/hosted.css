@@ -381,6 +381,46 @@ h1 {
   letter-spacing: 0.01em;
 }
 
+.hosted-event-enter .hosted-form-field input[type="text"] {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--hosted-border);
+  border-radius: 2px;
+  background: var(--hosted-surface);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hosted-event-enter .hosted-form-field input[type="text"]:focus {
+  outline: none;
+  border-color: var(--hosted-border-strong);
+}
+
+.hosted-event-enter fieldset {
+  margin: 0 0 16px;
+  padding: 0;
+  border: none;
+}
+
+.hosted-event-enter legend {
+  margin: 0 0 6px;
+  padding: 0;
+  font-size: 13px;
+}
+
+.hosted-event-access-code-value {
+  display: inline-block;
+  margin: 6px 0 0;
+  padding: 2px 6px;
+  border: 1px solid var(--hosted-border-strong);
+  border-radius: 2px;
+  font-size: 14px;
+  letter-spacing: 0.12em;
+}
+
 .hosted-session-list {
   margin: 0 0 16px;
   padding: 0;

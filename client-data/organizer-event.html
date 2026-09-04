@@ -89,6 +89,47 @@
           <button type="submit" class="hosted-submit">{{hostedTranslations.hosted_event_save}}</button>
         </form>
 
+        <h2 class="hosted-account-section-title">{{hostedTranslations.hosted_event_admission_title}}</h2>
+        {{#if hostedEventAccessCodeReveal}}
+        <p class="hosted-form-success" role="status">
+          {{hostedTranslations.hosted_event_access_code_reveal}}
+          <code class="hosted-event-access-code-value">{{hostedEventAccessCodeReveal}}</code>
+        </p>
+        <p class="hosted-form-hint">{{hostedTranslations.hosted_event_access_code_reveal_hint}}</p>
+        {{/if}}
+        <p class="hosted-account-note">
+          {{#if hostedEventHasAccessCode}}
+          {{hostedTranslations.hosted_event_access_code_set_note}} {{hostedEventAccessCodeSetAt}}
+          {{else}}
+          {{hostedTranslations.hosted_event_access_code_missing_note}}
+          {{/if}}
+        </p>
+        <form method="post" action="organizers/{{hostedOrganizerId}}/events/{{hostedEventId}}/access-code" class="hosted-reservation-action">
+          <input type="hidden" name="_csrf" value="{{csrfToken}}" />
+          <button type="submit" class="hosted-submit">{{hostedTranslations.hosted_event_access_code_rotate}}</button>
+        </form>
+        <p class="hosted-form-hint">{{hostedTranslations.hosted_event_access_code_rotate_hint}}</p>
+
+        <p class="hosted-account-note">
+          {{#if hostedEventEntryLocked}}
+          {{hostedTranslations.hosted_event_entry_locked_note}}
+          {{else}}
+          {{hostedTranslations.hosted_event_entry_open_note}}
+          {{/if}}
+        </p>
+        <form method="post" action="organizers/{{hostedOrganizerId}}/events/{{hostedEventId}}/entry-lock" class="hosted-reservation-action">
+          <input type="hidden" name="_csrf" value="{{csrfToken}}" />
+          <input type="hidden" name="locked" value="{{#if hostedEventEntryLocked}}0{{else}}1{{/if}}" />
+          <button type="submit" class="hosted-submit {{#if hostedEventEntryLocked}}hosted-submit-danger{{/if}}">
+            {{#if hostedEventEntryLocked}}
+            {{hostedTranslations.hosted_event_entry_unlock}}
+            {{else}}
+            {{hostedTranslations.hosted_event_entry_lock}}
+            {{/if}}
+          </button>
+        </form>
+        <p class="hosted-form-hint">{{hostedTranslations.hosted_event_entry_lock_hint}}</p>
+
         <h2 class="hosted-account-section-title">{{hostedTranslations.hosted_event_cover_label}}</h2>
         {{#if hostedEventHasCover}}
         <img class="hosted-event-cover-preview" src="{{hostedEventCoverHref}}" alt="{{hostedTranslations.hosted_event_cover_alt}}" />

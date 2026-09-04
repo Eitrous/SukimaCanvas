@@ -2,6 +2,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import * as productionConfig from "./configuration.mjs";
+import { BoundaryError } from "./http/boundary_errors.mjs";
 import { route, routeHttpRequests } from "./http/dispatch.mjs";
 import observability from "./observability/index.mjs";
 import {
@@ -17,11 +18,13 @@ import {
   serveAccountSessionRevoke,
   serveAccountSessionsRevokeOthers,
   serveBrandAsset,
+  serveCancelReservation,
+  serveEventAnonymity,
+  serveEventEnter,
   serveEventPage,
   serveForgot,
   serveLogin,
   serveLogout,
-  serveCancelReservation,
   serveOperatorApplication,
   serveOperatorApproveApplication,
   serveOperatorApproveChange,
@@ -36,12 +39,14 @@ import {
   serveOperatorReservations,
   serveOrganizerApply,
   serveOrganizerConsole,
+  serveOrganizerEvent,
+  serveOrganizerEventAccessCode,
+  serveOrganizerEventCover,
+  serveOrganizerEventEntryLock,
   serveOrganizerInvitationAccept,
   serveOrganizerInvitationDecline,
   serveOrganizerInvitationRevoke,
   serveOrganizerInvite,
-  serveOrganizerEvent,
-  serveOrganizerEventCover,
   serveOrganizerManage,
   serveOrganizerMemberRemove,
   serveOrganizerMemberRole,
@@ -57,8 +62,8 @@ import {
   redirectToRandomBoard,
   serveBoardStaticAsset,
   serveManifest,
-  serveRulesPage,
   serveRoot,
+  serveRulesPage,
   serveSource,
   serveStaticAsset,
 } from "./routes/static.mjs";
@@ -78,23 +83,68 @@ const hasDot = (value) => typeof value === "string" && value.includes(".");
  */
 function createWhiteboardHttpHandler() {
   return routeHttpRequests([
-    route("/boards", redirectBoardQuery, "boards_redirect"),
-    route("/boards/", rejectMissingBoardName, "board_page"),
-    route("/boards/{board}.svg", serveBoardSvg, "board_svg"),
-    route("/boards/{asset}", serveBoardStaticAsset, "static_file", {
-      where: (params) => hasDot(params.asset),
-    }),
-    route("/boards/{board}", serveBoardPage, "board_page", {
-      where: (params) => !hasDot(params.board),
-    }),
-    ...boardNameRouteGroup("/download", downloadBoard, "download_board"),
-    ...boardNameRouteGroup("/preview", serveBoardPreview, "preview_board"),
-    ...boardNameRouteGroup("/export", serveBoardPreview, "preview_board", {
-      access: "user",
-    }),
-    route("/random", redirectToRandomBoard, "random_board", {
-      access: "user",
-    }),
+    // Hosted mode closes every pre-Event WBO entry surface: no arbitrary
+    // boards, no random board allocation, no raw SVG, preview, export, or
+    // download. Each legacy handler is wrapped so hosted mode deterministically
+    // rejects with a plain 404 — never a redirect — leaving no compatibility
+    // path around admission. Legacy mode delegates unchanged.
+    route(
+      "/boards",
+      withHostedRejection(redirectBoardQuery),
+      "boards_redirect",
+    ),
+    route(
+      "/boards/",
+      withHostedRejection(rejectMissingBoardName),
+      "board_page",
+    ),
+    route(
+      "/boards/{board}.svg",
+      withHostedRejection(serveBoardSvg),
+      "board_svg",
+    ),
+    route(
+      "/boards/{asset}",
+      withHostedRejection(serveBoardStaticAsset),
+      "static_file",
+      {
+        where: (params) => hasDot(params.asset),
+      },
+    ),
+    route(
+      "/boards/{board}",
+      withHostedRejection(serveBoardPage),
+      "board_page",
+      {
+        where: (params) => !hasDot(params.board),
+      },
+    ),
+    ...boardNameRouteGroup(
+      "/download",
+      withHostedRejection(downloadBoard),
+      "download_board",
+    ),
+    ...boardNameRouteGroup(
+      "/preview",
+      withHostedRejection(serveBoardPreview),
+      "preview_board",
+    ),
+    ...boardNameRouteGroup(
+      "/export",
+      withHostedRejection(serveBoardPreview),
+      "preview_board",
+      {
+        access: "user",
+      },
+    ),
+    route(
+      "/random",
+      withHostedRejection(redirectToRandomBoard),
+      "random_board",
+      {
+        access: "user",
+      },
+    ),
     route("/rules", serveRulesPage, "rules"),
     route("/source", serveSource, "source"),
     route("/register", serveRegister, "hosted_register"),
@@ -183,6 +233,16 @@ function createWhiteboardHttpHandler() {
       "hosted_organizer_event",
     ),
     route(
+      "/organizers/{organizerId}/events/{eventId}/access-code",
+      serveOrganizerEventAccessCode,
+      "hosted_organizer_event_access_code",
+    ),
+    route(
+      "/organizers/{organizerId}/events/{eventId}/entry-lock",
+      serveOrganizerEventEntryLock,
+      "hosted_organizer_event_entry_lock",
+    ),
+    route(
       "/organizers/{organizerId}/events/{eventId}/cover",
       serveOrganizerEventCover,
       "hosted_organizer_event_cover",
@@ -240,6 +300,12 @@ function createWhiteboardHttpHandler() {
       "hosted_operator_application_reject",
     ),
     route("/events/{publicId}", serveEventPage, "hosted_event_page"),
+    route("/events/{publicId}/enter", serveEventEnter, "hosted_event_enter"),
+    route(
+      "/events/{publicId}/anonymity",
+      serveEventAnonymity,
+      "hosted_event_anonymity",
+    ),
     route("/assets/{assetId}", serveBrandAsset, "hosted_brand_asset"),
     route("/manifest.json", serveManifest, "manifest"),
     route("/", serveRoot, "index"),
@@ -258,6 +324,23 @@ function boardNameRouteGroup(prefix, handler, routeName, options) {
     route(`${prefix}/{board}`, handler, routeName, options),
     ...missingBoardNameRoutes(prefix, routeName, options),
   ];
+}
+
+/**
+ * Wraps a pre-Event WBO route handler so the Hosted Event Service
+ * deterministically rejects it with a plain 404 — never a redirect — leaving
+ * no compatibility path around admission. Legacy mode delegates unchanged.
+ *
+ * @param {import("../types/server-runtime.d.ts").HttpRouteHandler} handler
+ * @returns {import("../types/server-runtime.d.ts").HttpRouteHandler}
+ */
+function withHostedRejection(handler) {
+  return (ctx) => {
+    if (ctx.runtime.hostedEventModule.enabled) {
+      throw new BoundaryError(404, "hosted_legacy_entry_rejected");
+    }
+    return handler(ctx);
+  };
 }
 
 /**

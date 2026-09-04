@@ -188,6 +188,18 @@ export const HOSTED_BRAND_ASSET_ATTEMPTS_WINDOW_MS = parseIntegerEnv(
   15 * 60 * 1000,
 );
 
+/** Maximum Access Code submissions per account or IP within the window. */
+export const HOSTED_ACCESS_CODE_ATTEMPTS_LIMIT = parseIntegerEnv(
+  "WBO_HOSTED_ACCESS_CODE_ATTEMPTS_LIMIT",
+  10,
+);
+
+/** Window for hosted Access Code submission attempt limits. */
+export const HOSTED_ACCESS_CODE_ATTEMPTS_WINDOW_MS = parseIntegerEnv(
+  "WBO_HOSTED_ACCESS_CODE_ATTEMPTS_WINDOW_MS",
+  15 * 60 * 1000,
+);
+
 /**
  * Drain window between a Board Session entering CLOSING and being sealed CLOSED,
  * during which accepted writes are flushed before the archive is produced.

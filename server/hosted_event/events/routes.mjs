@@ -1,21 +1,22 @@
-import observability from "../../observability/index.mjs";
 import { BoundaryError } from "../../http/boundary_errors.mjs";
-import { resolveRequestClientIpSafe } from "../../socket/policy.mjs";
 import { publicPath } from "../../http/request_url.mjs";
+import observability from "../../observability/index.mjs";
+import { resolveRequestClientIpSafe } from "../../socket/policy.mjs";
+import { resolveSignedInAccountFromRequest } from "../accounts/routes.mjs";
+import { sniffImage } from "../assets/image_validation.mjs";
+import { readMultipartFormData } from "../assets/upload.mjs";
 import {
   createFormSecurity,
   readFormBody,
   seeOther,
   translate,
 } from "../http_forms.mjs";
-import { formatServiceTime } from "../service_time.mjs";
-import { resolveSignedInAccountFromRequest } from "../accounts/routes.mjs";
+import { accessCodeMatches } from "../memberships/access_codes.mjs";
 import {
   eventLifecycleState,
   MAX_EVENT_TAGLINE_LENGTH,
 } from "../organizers/store.mjs";
-import { sniffImage } from "../assets/image_validation.mjs";
-import { readMultipartFormData } from "../assets/upload.mjs";
+import { formatServiceTime } from "../service_time.mjs";
 
 const { logger } = observability;
 
@@ -35,21 +36,31 @@ const EVENT_STATUS_KEYS = {
 };
 
 /**
- * HTTP flows for Event discovery and Brand Asset display.
+ * HTTP flows for Event discovery, Access Code admission, Event Membership,
+ * and Brand Asset display.
  *
  * Visitors discover public, still-live events on the home page or open an
  * unlisted event through its unguessable Public ID; before an Access Code is
  * verified the event page exposes only the event's name, the organizer's
  * display name, its cover, its times, and a lifecycle status — never capacity,
- * participants, or administrative data. Organizer Owners/Admins toggle
- * visibility and manage the event's public display and its cover Brand Asset.
- * Brand Assets are only ever stored after real image decoding and are served
- * through a controlled read path that can never become an executable page.
+ * participants, or administrative data. A signed-in Participant submits the
+ * shared Access Code to create (or restore) a durable Event Membership that
+ * survives refreshes, code rotation, and Event Locks. Admission failures — a
+ * wrong code, an unknown Public ID on the POST path, a locked or otherwise
+ * not-enterable event — all render one uniform response so the entry form
+ * cannot be used to enumerate or probe events, and attempts are rate limited
+ * per Account and per IP. Organizer Owners/Admins toggle visibility, manage
+ * the event's public display and cover Brand Asset, mint and rotate the
+ * Access Code (revealed exactly once, stored only as a digest), and enable
+ * the Event Lock. Brand Assets are only ever stored after real image decoding
+ * and are served through a controlled read path that can never become an
+ * executable page.
  *
  * @param {{
  *   config: ServerConfig,
  *   accountStore: ReturnType<typeof import("../accounts/store.mjs").createFileAccountStore>,
  *   organizerStore: ReturnType<typeof import("../organizers/store.mjs").createFileOrganizerStore>,
+ *   membershipStore: ReturnType<typeof import("../memberships/store.mjs").createFileEventMembershipStore>,
  *   assetStore: ReturnType<typeof import("../assets/store.mjs").createFileBrandAssetStore>,
  *   limiter: ReturnType<typeof import("../accounts/rate_limits.mjs").createRateLimiter>,
  *   templates: {
@@ -65,6 +76,7 @@ function createEventRoutes(dependencies) {
     config,
     accountStore,
     organizerStore,
+    membershipStore,
     assetStore,
     limiter,
     templates,
@@ -79,6 +91,20 @@ function createEventRoutes(dependencies) {
    */
   function signedInAccount(ctx) {
     return resolveSignedInAccountFromRequest(accountStore, ctx.request);
+  }
+
+  /**
+   * Lazily runs the durable lifecycle advancement so any page or decision that
+   * reads Board Session state sees the authoritative status at the current
+   * service clock. Idempotent, so calling it on every read is safe.
+   *
+   * @returns {Promise<void>}
+   */
+  async function advanceLifecycleNow() {
+    await organizerStore.advanceLifecycle({
+      now: clock(),
+      closeDrainMs: config.HOSTED_BOARD_SESSION_CLOSE_DRAIN_MS,
+    });
   }
 
   /**
@@ -125,9 +151,9 @@ function createEventRoutes(dependencies) {
    * fields.
    *
    * @param {HttpRouteContext} ctx
-   * @returns {void}
+   * @returns {Promise<void>}
    */
-  function serveEventPage(ctx) {
+  async function serveEventPage(ctx) {
     if (ctx.request.method !== "GET") {
       throw new BoundaryError(405, "method_not_allowed");
     }
@@ -135,11 +161,37 @@ function createEventRoutes(dependencies) {
     // A missing or unknown Public ID is an ordinary 404: the id space is
     // unguessable, and listing status is never confirmed here.
     if (!event) throw new BoundaryError(404, "event_not_found");
+    // Advance the durable lifecycle so the displayed status is authoritative.
+    await advanceLifecycleNow();
+    renderEventPage(ctx, event, 200, {});
+  }
+
+  /**
+   * Renders the event page with the viewer's admission state. A signed-in
+   * member sees their membership and anonymity controls; a signed-in
+   * non-member sees the Access Code form while entry is possible; a
+   * signed-out visitor sees only the public fields plus a login prompt. The
+   * Event Lock state is deliberately never exposed here — it changes only
+   * what a submission accepts, never what the page shows.
+   *
+   * @param {HttpRouteContext} ctx
+   * @param {import("../organizers/store.mjs").StoredEvent} event
+   * @param {number} statusCode
+   * @param {{errorKey?: string, noticeKey?: string}} state
+   * @returns {void}
+   */
+  function renderEventPage(ctx, event, statusCode, state) {
     const template = templates.event;
     const organizer = organizerStore.getOrganizerById(event.organizerId);
     const cancelled = event.status === "cancelled";
     const lifecycle = eventLifecycleState(event, clock());
-    template.serveWithStatus(ctx.request, ctx.response, 200, {
+    const account = signedInAccount(ctx);
+    const membership = account
+      ? membershipStore.getMembership(event.eventId, account.accountId)
+      : null;
+    const session = organizerStore.getBoardSessionForEvent(event.eventId);
+    template.serveWithStatus(ctx.request, ctx.response, statusCode, {
+      hostedEventPublicId: event.publicId,
       hostedEventName: event.name,
       hostedEventOrganizerName: organizer ? organizer.name : "",
       hostedEventTagline: event.tagline || undefined,
@@ -159,7 +211,202 @@ function createEventRoutes(dependencies) {
       hostedEventScheduled: !cancelled && lifecycle === "scheduled",
       hostedEventOpen: !cancelled && lifecycle === "open",
       hostedEventEnded: !cancelled && lifecycle === "ended",
+      // Viewer admission state.
+      hostedEventSignedIn: Boolean(account),
+      hostedEventMember: Boolean(membership),
+      hostedEventMemberAnonymous: membership?.anonymity === "anonymous",
+      // The one-way switch to anonymous is offered only while the session has
+      // not yet left its changeable window (scheduled or open).
+      hostedEventAnonymityChangeable:
+        Boolean(membership) && sessionChangeable(session),
+      // New entry is offered only while the session is in its open window.
+      hostedEventEnterForm:
+        Boolean(account) && !membership && sessionOpen(session),
+      hostedEventLoginPrompt: !account && !cancelled && lifecycle !== "ended",
+      hostedEventEnterError: state.errorKey
+        ? translate(template, ctx, state.errorKey)
+        : undefined,
+      hostedEventEnterNotice: state.noticeKey
+        ? translate(template, ctx, state.noticeKey)
+        : undefined,
+      csrfToken: ensureCsrfToken(ctx),
     });
+  }
+
+  // --- access code admission & anonymity -----------------------------------
+
+  /**
+   * Whether the Board Session is in its open window — the only phase in which
+   * fresh admission is accepted.
+   *
+   * @param {import("../organizers/store.mjs").StoredBoardSession | null} session
+   * @returns {boolean}
+   */
+  function sessionOpen(session) {
+    return session !== null && session.status === "open";
+  }
+
+  /**
+   * Whether the anonymity choice can still change: until the session leaves
+   * its pre-close window (scheduled or open). The closing drain and every
+   * terminal state freeze it for archive stability.
+   *
+   * @param {import("../organizers/store.mjs").StoredBoardSession | null} session
+   * @returns {boolean}
+   */
+  function sessionChangeable(session) {
+    return (
+      session !== null &&
+      (session.status === "scheduled" || session.status === "open")
+    );
+  }
+
+  /**
+   * Whether a fresh Access Code submission may admit anyone to the event right
+   * now: the session must be open, and the event neither locked nor cancelled.
+   * A locked, cancelled, or non-open event refuses all new admission
+   * regardless of the code.
+   *
+   * @param {import("../organizers/store.mjs").StoredEvent} event
+   * @returns {boolean}
+   */
+  function eventEnterable(event) {
+    if (event.status === "cancelled" || event.entryLocked) return false;
+    return sessionOpen(organizerStore.getBoardSessionForEvent(event.eventId));
+  }
+
+  /**
+   * Handles the Access Code submission from the event page. Unknown Public IDs
+   * are a plain 404, exactly like the page route — this reveals nothing the
+   * unguessable Public ID space has not already settled. Every other failure —
+   * wrong code, locked, cancelled, or not-yet-open event — renders one uniform
+   * message with the same status, so the form reveals nothing about which
+   * condition failed. Attempts are rate limited per Account and per IP; the IP
+   * bucket is consumed first so a saturated shared address cannot drain
+   * honest accounts' budgets.
+   *
+   * @param {HttpRouteContext} ctx
+   * @returns {Promise<void>}
+   */
+  async function serveEventEnter(ctx) {
+    if (ctx.request.method !== "POST") {
+      throw new BoundaryError(405, "method_not_allowed");
+    }
+    const event = organizerStore.getEventByPublicId(ctx.params.publicId || "");
+    if (!event) throw new BoundaryError(404, "event_not_found");
+    const account = signedInAccount(ctx);
+    if (!account) {
+      seeOther(ctx, publicPath(config, "/login"));
+      return;
+    }
+    const form = await readFormBody(ctx.request);
+    // Advance the durable lifecycle so admission sees the authoritative
+    // session status at the current service clock.
+    await advanceLifecycleNow();
+    /**
+     * @param {number} statusCode
+     * @param {string} errorKey
+     * @returns {void}
+     */
+    const enterFailure = (statusCode, errorKey) =>
+      renderEventPage(ctx, event, statusCode, { errorKey });
+    if (!requestHasValidCsrf(ctx.request, form)) {
+      enterFailure(403, "hosted_error_csrf");
+      return;
+    }
+    const address = resolveRequestClientIpSafe(config, ctx.request);
+    const limit = config.HOSTED_ACCESS_CODE_ATTEMPTS_LIMIT;
+    const windowMs = config.HOSTED_ACCESS_CODE_ATTEMPTS_WINDOW_MS;
+    if (
+      !limiter.consume("event_access_code", `ip:${address}`, limit, windowMs)
+        .allowed ||
+      !limiter.consume(
+        "event_access_code",
+        `account:${account.accountId}`,
+        limit,
+        windowMs,
+      ).allowed
+    ) {
+      enterFailure(429, "hosted_error_rate_limited");
+      return;
+    }
+    const admitted =
+      eventEnterable(event) &&
+      accessCodeMatches(form.get("accessCode"), event.accessCodeDigest || "");
+    if (!admitted) {
+      logger.info("hosted.event_entry_rejected", {
+        event_id: event.eventId,
+      });
+      enterFailure(403, "hosted_event_enter_error_invalid");
+      return;
+    }
+    const anonymity =
+      form.get("anonymity") === "anonymous" ? "anonymous" : "identified";
+    const { created } = await membershipStore.admit({
+      eventId: event.eventId,
+      accountId: account.accountId,
+      anonymity,
+    });
+    if (created) {
+      logger.info("hosted.event_member_admitted", {
+        event_id: event.eventId,
+      });
+    }
+    seeOther(ctx, publicPath(config, `/events/${event.publicId}`));
+  }
+
+  /**
+   * Handles a member's one-way switch to anonymity. The choice can only move
+   * toward anonymous (withdrawing public attribution); once the Board Session
+   * reaches closing or beyond, the choice is frozen for archive stability.
+   *
+   * @param {HttpRouteContext} ctx
+   * @returns {Promise<void>}
+   */
+  async function serveEventAnonymity(ctx) {
+    if (ctx.request.method !== "POST") {
+      throw new BoundaryError(405, "method_not_allowed");
+    }
+    const event = organizerStore.getEventByPublicId(ctx.params.publicId || "");
+    if (!event) throw new BoundaryError(404, "event_not_found");
+    const account = signedInAccount(ctx);
+    if (!account) {
+      seeOther(ctx, publicPath(config, "/login"));
+      return;
+    }
+    const form = await readFormBody(ctx.request);
+    if (!requestHasValidCsrf(ctx.request, form)) {
+      renderEventPage(ctx, event, 403, { errorKey: "hosted_error_csrf" });
+      return;
+    }
+    // Advance the durable lifecycle so the freeze decision sees the
+    // authoritative session status.
+    await advanceLifecycleNow();
+    const membership = membershipStore.getMembership(
+      event.eventId,
+      account.accountId,
+    );
+    if (!membership) {
+      renderEventPage(ctx, event, 403, {
+        errorKey: "hosted_event_anonymity_error",
+      });
+      return;
+    }
+    // Once the session has left its open window — the closing drain and any
+    // terminal state — the anonymity choice is frozen for archive stability.
+    const session = organizerStore.getBoardSessionForEvent(event.eventId);
+    if (!sessionOpen(session)) {
+      renderEventPage(ctx, event, 409, {
+        errorKey: "hosted_event_anonymity_frozen_note",
+      });
+      return;
+    }
+    await membershipStore.setAnonymity({
+      eventId: event.eventId,
+      accountId: account.accountId,
+      anonymity: "anonymous",
+    });
+    seeOther(ctx, publicPath(config, `/events/${event.publicId}`));
   }
 
   /**
@@ -248,7 +495,7 @@ function createEventRoutes(dependencies) {
    * @param {string} organizerId
    * @param {import("../organizers/store.mjs").StoredEvent} event
    * @param {number} statusCode
-   * @param {{errorKey?: string, noticeKey?: string}} state
+   * @param {{errorKey?: string, noticeKey?: string, accessCodeReveal?: string}} state
    * @returns {void}
    */
   function renderManageEvent(ctx, organizerId, event, statusCode, state) {
@@ -275,6 +522,14 @@ function createEventRoutes(dependencies) {
         EVENT_STATUS_KEYS[lifecycle],
       ),
       hostedEventTaglineMax: MAX_EVENT_TAGLINE_LENGTH,
+      // Admission management. The Access Code itself is never re-rendered;
+      // only its one-time reveal after mint/rotation carries the raw value.
+      hostedEventHasAccessCode: event.accessCodeDigest !== null,
+      hostedEventAccessCodeSetAt: event.accessCodeSetAtMs
+        ? formatTimestamp(event.accessCodeSetAtMs)
+        : undefined,
+      hostedEventEntryLocked: event.entryLocked,
+      hostedEventAccessCodeReveal: state.accessCodeReveal || undefined,
       hostedEventManageError: state.errorKey
         ? translate(template, ctx, state.errorKey)
         : undefined,
@@ -440,11 +695,106 @@ function createEventRoutes(dependencies) {
     );
   }
 
+  /**
+   * Mints or rotates the event's shared Access Code. The raw code is returned
+   * in this response only — rendered once on the management page and never
+   * persisted or shown again. Rotation stops future admission with the old
+   * code and leaves every existing Event Membership untouched.
+   * Owner/Admin only.
+   *
+   * @param {HttpRouteContext} ctx
+   * @returns {Promise<void>}
+   */
+  async function serveOrganizerEventAccessCode(ctx) {
+    if (ctx.request.method !== "POST") {
+      throw new BoundaryError(405, "method_not_allowed");
+    }
+    const organizerId = ctx.params.organizerId || "";
+    const managed = requireManagedEvent(
+      ctx,
+      organizerId,
+      ctx.params.eventId || "",
+    );
+    if (!managed) return;
+    const form = await readFormBody(ctx.request);
+    if (!requestHasValidCsrf(ctx.request, form)) {
+      renderManageEvent(ctx, organizerId, managed.event, 403, {
+        errorKey: "hosted_error_csrf",
+      });
+      return;
+    }
+    const rotated = await organizerStore.rotateEventAccessCode({
+      organizerId,
+      eventId: managed.event.eventId,
+      actorAccountId: managed.account.accountId,
+    });
+    if (!rotated.ok) throw new BoundaryError(404, "event_not_found");
+    logger.info("hosted.event_access_code_rotated", {
+      organizer_id: organizerId,
+      event_id: managed.event.eventId,
+      replaced: rotated.replaced,
+    });
+    renderManageEvent(ctx, organizerId, managed.event, 200, {
+      accessCodeReveal: rotated.accessCode,
+    });
+  }
+
+  /**
+   * Enables or disables the Event Lock. Locking refuses all future Access
+   * Code admission while existing memberships are kept. Owner/Admin only.
+   *
+   * @param {HttpRouteContext} ctx
+   * @returns {Promise<void>}
+   */
+  async function serveOrganizerEventEntryLock(ctx) {
+    if (ctx.request.method !== "POST") {
+      throw new BoundaryError(405, "method_not_allowed");
+    }
+    const organizerId = ctx.params.organizerId || "";
+    const managed = requireManagedEvent(
+      ctx,
+      organizerId,
+      ctx.params.eventId || "",
+    );
+    if (!managed) return;
+    const form = await readFormBody(ctx.request);
+    if (!requestHasValidCsrf(ctx.request, form)) {
+      renderManageEvent(ctx, organizerId, managed.event, 403, {
+        errorKey: "hosted_error_csrf",
+      });
+      return;
+    }
+    const locked = form.get("locked") === "1";
+    const result = await organizerStore.setEventEntryLock({
+      organizerId,
+      eventId: managed.event.eventId,
+      locked,
+      actorAccountId: managed.account.accountId,
+    });
+    if (!result.ok) throw new BoundaryError(404, "event_not_found");
+    logger.info("hosted.event_entry_lock_changed", {
+      organizer_id: organizerId,
+      event_id: managed.event.eventId,
+      locked,
+    });
+    seeOther(
+      ctx,
+      publicPath(
+        config,
+        `/organizers/${organizerId}/events/${managed.event.eventId}`,
+      ),
+    );
+  }
+
   return {
     serveHome,
     serveEventPage,
+    serveEventEnter,
+    serveEventAnonymity,
     serveBrandAsset,
     serveOrganizerEvent,
+    serveOrganizerEventAccessCode,
+    serveOrganizerEventEntryLock,
     serveOrganizerEventCover,
   };
 }

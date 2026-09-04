@@ -1,0 +1,254 @@
+import crypto from "node:crypto";
+import * as fs from "node:fs";
+import * as path from "node:path";
+
+import observability from "../../observability/index.mjs";
+
+const { logger } = observability;
+
+const STORE_FORMAT_VERSION = 1;
+
+/**
+ * @typedef {"identified" | "anonymous"} AnonymityChoice
+ */
+
+/**
+ * Durable Event Membership: the record that an Account was admitted to an
+ * Event through its Access Code. Memberships survive refreshes, reconnects,
+ * session revocations, Access Code rotation, and Event Locks; only the
+ * organizer store's lifecycle decisions (a cancelled event) outlive their
+ * usefulness, and nothing here is ever deleted by them.
+ *
+ * The anonymity choice records whether the participant consents to their
+ * Participant Identifier appearing in the future Published Canvas. It stays
+ * editable until the event's Board Session closes; the route layer freezes
+ * it afterwards because archive stability, not this store, owns that rule.
+ *
+ * @typedef {{
+ *   eventId: string,
+ *   accountId: string,
+ *   joinedAtMs: number,
+ *   anonymity: AnonymityChoice,
+ *   anonymityUpdatedAtMs: number,
+ * }} StoredEventMembership
+ */
+
+/**
+ * Durable storage for Event Memberships, in JSON files under the shared
+ * hosted data directory, exactly like the other hosted stores: reads come
+ * from an in-memory index loaded on first use, and every mutation is appended
+ * to a serialized write queue with atomic file replacement. Admission
+ * (check-and-create) runs synchronously before yielding, so a participant who
+ * submits twice, or from two tabs, gains exactly one membership whose first
+ * anonymity choice is the one that sticks.
+ *
+ * @param {{
+ *   dataDir: string,
+ *   clock?: () => number,
+ * }} options
+ */
+function createFileEventMembershipStore(options) {
+  const dataDir = options.dataDir;
+  const clock = options.clock || (() => Date.now());
+
+  /** @type {Map<string, StoredEventMembership>} */
+  const membershipsByKey = new Map();
+  let loaded = false;
+  let writeQueue = Promise.resolve();
+
+  const MEMBERSHIPS_FILE = path.join(dataDir, "event_memberships.json");
+
+  function ensureLoaded() {
+    if (loaded) return;
+    loaded = true;
+    fs.mkdirSync(dataDir, { recursive: true });
+    const stored = readStoreFile(MEMBERSHIPS_FILE, { memberships: [] });
+    for (const membership of /** @type {StoredEventMembership[]} */ (
+      stored.memberships || []
+    )) {
+      membershipsByKey.set(
+        membershipKey(membership.eventId, membership.accountId),
+        membership,
+      );
+    }
+  }
+
+  /**
+   * @template T
+   * @param {string} filePath
+   * @param {T} fallback
+   * @returns {T}
+   */
+  function readStoreFile(filePath, fallback) {
+    let contents;
+    try {
+      contents = fs.readFileSync(filePath, "utf8");
+    } catch (error) {
+      if (/** @type {NodeJS.ErrnoException} */ (error).code === "ENOENT") {
+        return fallback;
+      }
+      throw error;
+    }
+    const parsed = JSON.parse(contents);
+    if (parsed.version !== STORE_FORMAT_VERSION) {
+      throw new Error(
+        `Unsupported hosted membership store format in ${filePath}`,
+      );
+    }
+    return parsed;
+  }
+
+  /**
+   * Appends one persistence task to the serialized write queue. The caller
+   * observes failures of its own task; the chain itself stays alive so a
+   * single failed write cannot poison later ones.
+   *
+   * @template T
+   * @param {() => T | Promise<T>} task
+   * @returns {Promise<T>}
+   */
+  function enqueueWrite(task) {
+    const pending = /** @type {Promise<void>} */ (
+      writeQueue.then(
+        () => {},
+        () => {},
+      )
+    );
+    const run = pending.then(task);
+    writeQueue = run.then(
+      () => {},
+      (error) => {
+        logger.error("hosted_membership_store.write_failed", { error });
+      },
+    );
+    return run;
+  }
+
+  /**
+   * @returns {Promise<void>}
+   */
+  async function persistNow() {
+    fs.mkdirSync(dataDir, { recursive: true });
+    await writeStoreFile(MEMBERSHIPS_FILE, {
+      version: STORE_FORMAT_VERSION,
+      memberships: [...membershipsByKey.values()],
+    });
+  }
+
+  /**
+   * @param {string} filePath
+   * @param {unknown} payload
+   * @returns {Promise<void>}
+   */
+  async function writeStoreFile(filePath, payload) {
+    const temporaryPath = `${filePath}.tmp-${process.pid}-${crypto
+      .randomBytes(4)
+      .toString("hex")}`;
+    await fs.promises.writeFile(temporaryPath, JSON.stringify(payload), "utf8");
+    await fs.promises.rename(temporaryPath, filePath);
+  }
+
+  /**
+   * @param {string} eventId
+   * @param {string} accountId
+   * @returns {string}
+   */
+  function membershipKey(eventId, accountId) {
+    return `${eventId}:${accountId}`;
+  }
+
+  /**
+   * The account's membership in an event, or null.
+   *
+   * @param {string} eventId
+   * @param {string} accountId
+   * @returns {StoredEventMembership | null}
+   */
+  function getMembership(eventId, accountId) {
+    ensureLoaded();
+    if (typeof eventId !== "string" || typeof accountId !== "string") {
+      return null;
+    }
+    if (eventId === "" || accountId === "") return null;
+    return membershipsByKey.get(membershipKey(eventId, accountId)) || null;
+  }
+
+  /**
+   * Admits an account to an event: creates the membership on first admission
+   * and restores the existing one afterwards, keeping the original anonymity
+   * choice. Idempotent and synchronous in its check-and-create, so duplicate
+   * submissions cannot produce two records or overwrite an existing choice.
+   *
+   * @param {{
+   *   eventId: string,
+   *   accountId: string,
+   *   anonymity: AnonymityChoice,
+   * }} input
+   * @returns {Promise<{membership: StoredEventMembership, created: boolean}>}
+   */
+  async function admit(input) {
+    ensureLoaded();
+    const eventId = String(input.eventId || "");
+    const accountId = String(input.accountId || "");
+    if (eventId === "" || accountId === "") {
+      throw new Error("admit requires eventId and accountId");
+    }
+    const existing = membershipsByKey.get(membershipKey(eventId, accountId));
+    if (existing) return { membership: existing, created: false };
+    /** @type {StoredEventMembership} */
+    const membership = {
+      eventId,
+      accountId,
+      joinedAtMs: clock(),
+      anonymity: input.anonymity === "anonymous" ? "anonymous" : "identified",
+      anonymityUpdatedAtMs: clock(),
+    };
+    membershipsByKey.set(membershipKey(eventId, accountId), membership);
+    await enqueueWrite(persistNow);
+    return { membership, created: true };
+  }
+
+  /**
+   * Updates a member's anonymity choice. Membership is never created here;
+   * changing the choice is only possible for an existing member before the
+   * route layer's session-close freeze.
+   *
+   * @param {{
+   *   eventId: string,
+   *   accountId: string,
+   *   anonymity: AnonymityChoice,
+   * }} input
+   * @returns {Promise<{ok: true} | {ok: false, reason: "not_member"}>}
+   */
+  async function setAnonymity(input) {
+    ensureLoaded();
+    const membership = membershipsByKey.get(
+      membershipKey(String(input.eventId || ""), String(input.accountId || "")),
+    );
+    if (!membership) return { ok: false, reason: "not_member" };
+    membership.anonymity =
+      input.anonymity === "anonymous" ? "anonymous" : "identified";
+    membership.anonymityUpdatedAtMs = clock();
+    await enqueueWrite(persistNow);
+    return { ok: true };
+  }
+
+  /**
+   * Resolves once every scheduled write has landed on disk.
+   *
+   * @returns {Promise<void>}
+   */
+  async function flush() {
+    ensureLoaded();
+    await writeQueue;
+  }
+
+  return {
+    getMembership,
+    admit,
+    setAnonymity,
+    flush,
+  };
+}
+
+export { createFileEventMembershipStore };

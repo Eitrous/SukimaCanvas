@@ -69,8 +69,12 @@ export type HostedEventModule = {
   serveOperatorApproveChange: HttpRouteHandler;
   serveOperatorRejectChange: HttpRouteHandler;
   serveEventPage: HttpRouteHandler;
+  serveEventEnter: HttpRouteHandler;
+  serveEventAnonymity: HttpRouteHandler;
   serveBrandAsset: HttpRouteHandler;
   serveOrganizerEvent: HttpRouteHandler;
+  serveOrganizerEventAccessCode: HttpRouteHandler;
+  serveOrganizerEventEntryLock: HttpRouteHandler;
   serveOrganizerEventCover: HttpRouteHandler;
 };
 

@@ -1,8 +1,13 @@
+import crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import crypto from "node:crypto";
 
 import observability from "../../observability/index.mjs";
+import {
+  digestAccessCode,
+  generateAccessCode,
+  normalizeAccessCode,
+} from "../memberships/access_codes.mjs";
 
 const { logger } = observability;
 
@@ -135,6 +140,10 @@ function eventLifecycleState(event, now) {
  *   startsAtMs: number,
  *   endsAtMs: number,
  *   createdAtMs: number,
+ *   accessCodeDigest: string | null,
+ *   accessCodeSetAtMs: number | null,
+ *   entryLocked: boolean,
+ *   entryLockedAtMs: number | null,
  * }} StoredEvent
  */
 /**
@@ -390,6 +399,14 @@ function createFileOrganizerStore(options) {
       if (typeof event.tagline !== "string") event.tagline = "";
       if (event.coverAssetId === undefined) event.coverAssetId = null;
       if (event.status !== "cancelled") event.status = "active";
+      if (event.accessCodeDigest === undefined) {
+        event.accessCodeDigest = null;
+      }
+      if (event.accessCodeSetAtMs === undefined) {
+        event.accessCodeSetAtMs = null;
+      }
+      if (typeof event.entryLocked !== "boolean") event.entryLocked = false;
+      if (event.entryLockedAtMs === undefined) event.entryLockedAtMs = null;
       eventsById.set(event.eventId, event);
       eventIdsByPublicId.set(event.publicId, event.eventId);
     }
@@ -1496,6 +1513,13 @@ function createFileOrganizerStore(options) {
       startsAtMs: reservation.startsAtMs,
       endsAtMs: reservation.endsAtMs,
       createdAtMs: now,
+      // The shared Access Code is minted on demand by the managing
+      // Owner/Admin so its raw value is revealed exactly once; until then no
+      // code exists and none can be guessed.
+      accessCodeDigest: null,
+      accessCodeSetAtMs: null,
+      entryLocked: false,
+      entryLockedAtMs: null,
     });
     eventIdsByPublicId.set(publicId, eventId);
     boardSessionsById.set(boardSessionId, {
@@ -2153,6 +2177,83 @@ function createFileOrganizerStore(options) {
     return { ok: true };
   }
 
+  // --- event admission: access code, entry lock, membership ---------------
+
+  /**
+   * The Board Session backing an event, or null.
+   *
+   * @param {string} eventId
+   * @returns {StoredBoardSession | null}
+   */
+  function getBoardSessionForEvent(eventId) {
+    ensureLoaded();
+    if (typeof eventId !== "string" || eventId === "") return null;
+    for (const session of boardSessionsById.values()) {
+      if (session.eventId === eventId) return session;
+    }
+    return null;
+  }
+
+  /**
+   * Mints (or replaces) the event's shared Access Code and returns the raw
+   * value exactly once. Only the SHA-256 digest is persisted, so a later read
+   * can never reveal the code; rotating simply stops the previous digest from
+   * matching and leaves every existing Event Membership untouched.
+   * Owner/Admin-only in the route layer; the store verifies the event belongs
+   * to the organizer.
+   *
+   * @param {{organizerId: string, eventId: string, actorAccountId: string}} input
+   * @returns {Promise<{ok: true, accessCode: string, replaced: boolean} | {ok: false, reason: "not_found"}>}
+   */
+  async function rotateEventAccessCode(input) {
+    ensureLoaded();
+    const event = getEventForOrganizer(input.organizerId, input.eventId);
+    if (!event) return { ok: false, reason: "not_found" };
+    const replaced = event.accessCodeDigest !== null;
+    const accessCode = generateAccessCode();
+    event.accessCodeDigest = digestAccessCode(normalizeAccessCode(accessCode));
+    event.accessCodeSetAtMs = clock();
+    recordAudit({
+      actorAccountId: String(input.actorAccountId || ""),
+      actorKind: "account",
+      action: replaced ? "event.access_code_rotated" : "event.access_code_set",
+      subjectType: "event",
+      subjectId: event.eventId,
+      organizerId: event.organizerId,
+    });
+    await enqueueWrite(persistNow);
+    return { ok: true, accessCode, replaced };
+  }
+
+  /**
+   * Enables or disables the Event Lock. Locking rejects all future Access
+   * Code admissions while every existing Event Membership is retained —
+   * members stay members; they simply cannot be joined by anyone new.
+   * Owner/Admin-only in the route layer.
+   *
+   * @param {{organizerId: string, eventId: string, locked: boolean, actorAccountId: string}} input
+   * @returns {Promise<{ok: true} | {ok: false, reason: "not_found"}>}
+   */
+  async function setEventEntryLock(input) {
+    ensureLoaded();
+    const event = getEventForOrganizer(input.organizerId, input.eventId);
+    if (!event) return { ok: false, reason: "not_found" };
+    const locked = input.locked === true;
+    if (event.entryLocked === locked) return { ok: true };
+    event.entryLocked = locked;
+    event.entryLockedAtMs = clock();
+    recordAudit({
+      actorAccountId: String(input.actorAccountId || ""),
+      actorKind: "account",
+      action: locked ? "event.entry_locked" : "event.entry_unlocked",
+      subjectType: "event",
+      subjectId: event.eventId,
+      organizerId: event.organizerId,
+    });
+    await enqueueWrite(persistNow);
+    return { ok: true };
+  }
+
   /**
    * Resolves once every scheduled write has landed on disk.
    *
@@ -2211,16 +2312,19 @@ function createFileOrganizerStore(options) {
     getEventById,
     getEventByPublicId,
     getEventForOrganizer,
+    getBoardSessionForEvent,
     listPublicDiscoverableEvents,
     updateEventDisplay,
     setEventCover,
+    rotateEventAccessCode,
+    setEventEntryLock,
     flush,
   };
 }
 
 export {
-  createFileOrganizerStore,
   computeCapacityPeak,
+  createFileOrganizerStore,
   eventLifecycleState,
   MAX_EVENT_TAGLINE_LENGTH,
 };
