@@ -284,22 +284,12 @@ function getActiveSocket(socketId) {
  */
 async function refreshUserAccess(boardName, userSecret, config) {
   if (!userSecret) return;
-  const boardPromise = getLoadedBoard(boardName);
-  if (!boardPromise) return;
-  const board = await boardPromise;
   const users = getBoardUserMap(boardName);
   for (const user of users.values()) {
     if (user.userSecret !== userSecret) continue;
     const targetSocket = activeSockets.get(user.socketId);
     if (!targetSocket || !targetSocket.rooms.has(boardName)) continue;
-    const boardState = boardStateForSocket(config, board, targetSocket);
-    user.canEdit = boardState.canEdit === true;
-    user.canClear = boardState.canClear === true;
-    user.canBan = boardState.canBan === true;
-    user.canGrantTemporaryModerator =
-      boardState.canGrantTemporaryModerator === true;
-    targetSocket.emit(SocketEvents.BOARDSTATE, boardState);
-    emitUserUpdatedToBoard(targetSocket, boardName, user);
+    await refreshSocketAccess(targetSocket, config);
   }
 }
 
@@ -382,6 +372,121 @@ function resolveClientIp(socket, boardName, config) {
 }
 
 /**
+ * Runs the Hosted Event admission gate for one socket: in hosted mode every
+ * connection must be admitted through the Hosted Event Module, which decides
+ * role, seat, and eligibility from the hosted session cookie and the event
+ * stores. Idempotent per socket — the middleware admits before replay, and
+ * the connection handler only fills the gap when the middleware never ran
+ * (socket scenarios). On success the socket carries its pinned board role and
+ * admission verdict for every later capability decision.
+ *
+ * @param {AppSocket} socket
+ * @returns {Promise<{ok: true} | {ok: false, reason: string}>}
+ */
+async function admitHostedSocket(socket) {
+  const hosted = socket.hostedEventModule;
+  if (hosted?.enabled !== true || socket.hostedEventAdmission) {
+    return { ok: true };
+  }
+  // Advance the durable lifecycle so admission sees the authoritative Board
+  // Session status at the current service clock.
+  if (typeof hosted.refreshEventLifecycle === "function") {
+    await hosted.refreshEventLifecycle();
+  }
+  const verdict = hosted.admitEventBoardSocket({
+    boardName: String(socket.handshake.query?.board || ""),
+    cookieHeader: socket.handshake.headers?.cookie,
+  });
+  if (verdict.ok === false) {
+    return { ok: false, reason: verdict.reason };
+  }
+  socket.hostedEventAdmission = verdict;
+  socket.hostedBoardRole = verdict.role;
+  return { ok: true };
+}
+
+/**
+ * Registers an admitted socket with the seat registry once the connection is
+ * real (replay succeeded), reconciling the pinned role with the account's
+ * actual writer slot. Registers nothing for Owner/Admin connections, which
+ * never contend for Participant Seats.
+ *
+ * @param {AppSocket} socket
+ * @returns {void}
+ */
+function registerHostedSocketConnection(socket) {
+  const hosted = socket.hostedEventModule;
+  const admission = socket.hostedEventAdmission;
+  if (hosted?.enabled !== true || !admission) return;
+  const connected = hosted.noteEventSocketConnected(admission, socket.id);
+  if (!connected.admitted) {
+    // A racing handshake consumed the last seat between this socket's
+    // preview and its registration; the drop is the authoritative refusal.
+    logger.warn("socket.hosted_seat_refused_on_connect", {
+      socket: socket.id,
+      board: admission.boardName,
+    });
+    closeSocket(socket, "connection", { reason: "event_full" });
+    return;
+  }
+  admission.socketId = socket.id;
+  // The writer slot may have been claimed between admission preview and
+  // connection; the registry's answer is authoritative.
+  if (admission.role !== "moderator") {
+    socket.hostedBoardRole = connected.writable ? "editor" : "reader";
+    socket.boardPermissionContext = undefined;
+  }
+}
+
+/**
+ * Re-emits authoritative state for one socket after its hosted role changed
+ * (for example a read-only tab promoted to writer), keeping the tab's
+ * capabilities and presence in step without a reconnect.
+ *
+ * @param {AppSocket} targetSocket
+ * @param {ServerConfig} config
+ * @returns {Promise<void>}
+ */
+async function refreshSocketAccess(targetSocket, config) {
+  const boardPromise = getLoadedBoard(targetSocket.boardName || "");
+  if (!boardPromise) return;
+  const board = await boardPromise;
+  if (!targetSocket.rooms.has(board.name)) return;
+  const boardState = boardStateForSocket(config, board, targetSocket);
+  const user = getBoardUserMap(board.name).get(targetSocket.id);
+  if (user) {
+    user.canEdit = boardState.canEdit === true;
+    user.canClear = boardState.canClear === true;
+    user.canBan = boardState.canBan === true;
+    user.canGrantTemporaryModerator =
+      boardState.canGrantTemporaryModerator === true;
+    emitUserUpdatedToBoard(targetSocket, board.name, user);
+  }
+  targetSocket.emit(SocketEvents.BOARDSTATE, boardState);
+}
+
+/**
+ * Releases a hosted socket's seat on disconnect and refreshes the companion
+ * connection promoted to the account's writer slot, if any.
+ *
+ * @param {AppSocket} socket
+ * @param {ServerConfig} config
+ * @returns {Promise<void>}
+ */
+async function releaseHostedSocket(socket, config) {
+  const hosted = socket.hostedEventModule;
+  const admission = socket.hostedEventAdmission;
+  if (hosted?.enabled !== true || !admission) return;
+  const released = hosted.releaseEventSocket(socket.id);
+  if (!released.promotedSocketId) return;
+  const promoted = activeSockets.get(released.promotedSocketId);
+  if (!promoted || promoted.hostedEventAdmission?.role === "moderator") return;
+  promoted.hostedBoardRole = "editor";
+  promoted.boardPermissionContext = undefined;
+  await refreshSocketAccess(promoted, config);
+}
+
+/**
  * @param {any} app
  * @param {ServerConfig} config
  * @param {ServerRuntime} runtime
@@ -398,20 +503,34 @@ async function startIO(app, config, runtime) {
       // lifecycle as the HTTP routes receive. Hosted capabilities can extend
       // this seam without creating a second configuration or template graph.
       socket.hostedEventModule = runtime.hostedEventModule;
-      prepareConnectionReplay(
-        socket,
-        config,
-        getBoard,
-        dropLoadedBoardInstance,
-        boardDebugFields,
-      )
-        .then((replay) => {
-          if (replay.ok === true) {
-            socket.replayBootstrap = replay;
-            next();
+      // In hosted mode every connection passes the Hosted Event admission
+      // gate before anything else: roles and seats are decided here, and
+      // legacy boards or unmet admission conditions never reach replay.
+      admitHostedSocket(socket)
+        .then((admission) => {
+          if (admission.ok === false) {
+            next(
+              createConnectionReplayError({
+                ok: false,
+                reason: admission.reason,
+              }),
+            );
             return;
           }
-          next(createConnectionReplayError(replay));
+          return prepareConnectionReplay(
+            socket,
+            config,
+            getBoard,
+            dropLoadedBoardInstance,
+            boardDebugFields,
+          ).then((replay) => {
+            if (replay.ok === true) {
+              socket.replayBootstrap = replay;
+              next();
+              return;
+            }
+            next(createConnectionReplayError(replay));
+          });
         })
         .catch((error) => {
           next(error instanceof Error ? error : new Error(String(error)));
@@ -559,6 +678,14 @@ async function bootstrapSocketBoard(socket, replay, config) {
  * @param {ServerConfig} config
  */
 async function handleSocketConnection(socket, config) {
+  // Fill in hosted admission when the middleware never ran (socket
+  // scenarios); in the real server this is already decided before replay.
+  const hostedAdmission = await admitHostedSocket(socket);
+  if (hostedAdmission.ok === false) {
+    rejectSocketRequest(socket, "connection", hostedAdmission.reason);
+    closeSocket(socket, "connection", { reason: hostedAdmission.reason });
+    return;
+  }
   const replayBootstrap = /** @type {ConnectionReplayBootstrap | undefined} */ (
     socket.replayBootstrap
   );
@@ -581,6 +708,9 @@ async function handleSocketConnection(socket, config) {
   activeSockets.set(socket.id, socket);
   updateActiveSocketConnectionsGauge();
   metrics.recordSocketConnection("connected");
+  // The connection is real: register it with the hosted seat registry so the
+  // account's writable slot and seat occupancy reflect live sockets only.
+  registerHostedSocketConnection(socket);
 
   onSocketEvent(socket, "error", function onSocketError(error) {
     logger.error("socket.error", {
@@ -724,6 +854,14 @@ async function handleSocketConnection(socket, config) {
       syncedPersistentSockets.delete(socket.id);
       updateActiveSocketConnectionsGauge();
       metrics.recordSocketConnection("disconnected");
+      // Release the hosted seat (and promote a companion to the writer slot)
+      // before the room teardown so the promotion can still find its board.
+      void releaseHostedSocket(socket, config).catch((error) => {
+        logger.error("socket.hosted_release_failed", {
+          socket: socket.id,
+          error,
+        });
+      });
       socket.rooms.forEach(
         async function disconnectFrom(/** @type {string} */ room) {
           const boardPromise = getLoadedBoard(room);
@@ -900,6 +1038,11 @@ async function shutdownBoards() {
 }
 
 export const __test = {
+  admitHostedSocket: function admitHostedSocketForTest(
+    /** @type {AppSocket} */ socket,
+  ) {
+    return admitHostedSocket(socket);
+  },
   buildBoardUserRecord: function buildBoardUserRecordForTest(
     /** @type {AppSocket} */ socket,
     /** @type {string} */ boardName,

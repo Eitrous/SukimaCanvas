@@ -32,15 +32,27 @@ const STORE_FORMAT_VERSION = 1;
  *   anonymityUpdatedAtMs: number,
  * }} StoredEventMembership
  */
+/**
+ * A durable Event Ban: the Account is barred from the Event's Board Session
+ * and from re-admission. Bans are keyed like memberships and survive
+ * rotation, locks, and restarts; lifting a ban restores eligibility but
+ * never resurrects the revoked membership.
+ *
+ * @typedef {{
+ *   eventId: string,
+ *   accountId: string,
+ *   createdAtMs: number,
+ * }} StoredEventBan
+ */
 
 /**
- * Durable storage for Event Memberships, in JSON files under the shared
- * hosted data directory, exactly like the other hosted stores: reads come
- * from an in-memory index loaded on first use, and every mutation is appended
- * to a serialized write queue with atomic file replacement. Admission
- * (check-and-create) runs synchronously before yielding, so a participant who
- * submits twice, or from two tabs, gains exactly one membership whose first
- * anonymity choice is the one that sticks.
+ * Durable storage for Event Memberships and Event Bans, in JSON files under
+ * the shared hosted data directory, exactly like the other hosted stores:
+ * reads come from an in-memory index loaded on first use, and every mutation
+ * is appended to a serialized write queue with atomic file replacement.
+ * Admission (check-and-create) runs synchronously before yielding, so a
+ * participant who submits twice, or from two tabs, gains exactly one
+ * membership whose first anonymity choice is the one that sticks.
  *
  * @param {{
  *   dataDir: string,
@@ -53,6 +65,8 @@ function createFileEventMembershipStore(options) {
 
   /** @type {Map<string, StoredEventMembership>} */
   const membershipsByKey = new Map();
+  /** @type {Map<string, StoredEventBan>} */
+  const bansByKey = new Map();
   let loaded = false;
   let writeQueue = Promise.resolve();
 
@@ -62,7 +76,10 @@ function createFileEventMembershipStore(options) {
     if (loaded) return;
     loaded = true;
     fs.mkdirSync(dataDir, { recursive: true });
-    const stored = readStoreFile(MEMBERSHIPS_FILE, { memberships: [] });
+    const stored = readStoreFile(MEMBERSHIPS_FILE, {
+      memberships: [],
+      bans: [],
+    });
     for (const membership of /** @type {StoredEventMembership[]} */ (
       stored.memberships || []
     )) {
@@ -71,6 +88,21 @@ function createFileEventMembershipStore(options) {
         membership,
       );
     }
+    for (const ban of /** @type {StoredEventBan[]} */ (stored.bans || [])) {
+      bansByKey.set(banKey(ban.eventId, ban.accountId), ban);
+    }
+  }
+
+  /**
+   * Bans share the membership key namespace (same Event/Account pair, kept
+   * in a separate map so lifting a ban never resurrects the membership).
+   *
+   * @param {string} eventId
+   * @param {string} accountId
+   * @returns {string}
+   */
+  function banKey(eventId, accountId) {
+    return membershipKey(eventId, accountId);
   }
 
   /**
@@ -132,6 +164,7 @@ function createFileEventMembershipStore(options) {
     await writeStoreFile(MEMBERSHIPS_FILE, {
       version: STORE_FORMAT_VERSION,
       memberships: [...membershipsByKey.values()],
+      bans: [...bansByKey.values()],
     });
   }
 
@@ -233,6 +266,73 @@ function createFileEventMembershipStore(options) {
     return { ok: true };
   }
 
+  // --- event bans -----------------------------------------------------------
+
+  /**
+   * Whether the account is banned from the event. Deliberately membership-
+   * independent: banning also blocks re-admission, and unbanning does not
+   * resurrect a revoked membership.
+   *
+   * @param {string} eventId
+   * @param {string} accountId
+   * @returns {boolean}
+   */
+  function isEventBanned(eventId, accountId) {
+    ensureLoaded();
+    return bansByKey.has(banKey(eventId, accountId));
+  }
+
+  /**
+   * Bans an account from an event, revoking any existing membership so the
+   * banned participant loses board access immediately. Idempotent.
+   *
+   * @param {{eventId: string, accountId: string}} input
+   * @returns {Promise<{ok: true, revokedMembership: boolean}>}
+   */
+  async function banEvent(input) {
+    ensureLoaded();
+    const eventId = String(input.eventId || "");
+    const accountId = String(input.accountId || "");
+    if (eventId === "" || accountId === "") {
+      throw new Error("banEvent requires eventId and accountId");
+    }
+    let revokedMembership = false;
+    const key = membershipKey(eventId, accountId);
+    if (membershipsByKey.has(key)) {
+      membershipsByKey.delete(key);
+      revokedMembership = true;
+    }
+    if (!bansByKey.has(key)) {
+      bansByKey.set(key, {
+        eventId,
+        accountId,
+        createdAtMs: clock(),
+      });
+    }
+    await enqueueWrite(persistNow);
+    return { ok: true, revokedMembership };
+  }
+
+  /**
+   * Lifts an event ban. Eligibility is restored in the sense that the account
+   * may be admitted again through the Access Code; a previously revoked
+   * membership is not recreated.
+   *
+   * @param {{eventId: string, accountId: string}} input
+   * @returns {Promise<{ok: true} | {ok: false, reason: "not_banned"}>}
+   */
+  async function unbanEvent(input) {
+    ensureLoaded();
+    const key = banKey(
+      String(input.eventId || ""),
+      String(input.accountId || ""),
+    );
+    if (!bansByKey.has(key)) return { ok: false, reason: "not_banned" };
+    bansByKey.delete(key);
+    await enqueueWrite(persistNow);
+    return { ok: true };
+  }
+
   /**
    * Resolves once every scheduled write has landed on disk.
    *
@@ -247,6 +347,9 @@ function createFileEventMembershipStore(options) {
     getMembership,
     admit,
     setAnonymity,
+    isEventBanned,
+    banEvent,
+    unbanEvent,
     flush,
   };
 }

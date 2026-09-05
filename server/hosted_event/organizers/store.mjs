@@ -25,6 +25,19 @@ function randomPublicEventId() {
   return crypto.randomBytes(12).toString("base64url");
 }
 
+/**
+ * The WBO board name behind an event's Board Session: an `event-` prefixed,
+ * lowercase hex encoding of 12 random bytes (96 bits). It is a second public,
+ * unguessable identifier — distinct from the internal Board Session id — and
+ * stays a valid board name (lowercase letters, digits, single dashes), so it
+ * can flow through board-name normalization untouched.
+ *
+ * @returns {string}
+ */
+function randomEventBoardName() {
+  return `event-${crypto.randomBytes(12).toString("hex")}`;
+}
+
 /** Application field bounds; the route validates first, the store clamps defensively. */
 const MAX_ORGANIZER_NAME_LENGTH = 120;
 const MAX_CONTACT_NAME_LENGTH = 120;
@@ -130,6 +143,7 @@ function eventLifecycleState(event, now) {
  * @typedef {{
  *   eventId: string,
  *   publicId: string,
+ *   boardName: string,
  *   reservationId: string,
  *   organizerId: string,
  *   name: string,
@@ -296,6 +310,8 @@ function createFileOrganizerStore(options) {
   const eventsById = new Map();
   /** @type {Map<string, string>} */
   const eventIdsByPublicId = new Map();
+  /** @type {Map<string, string>} */
+  const eventIdsByBoardName = new Map();
   /** @type {Map<string, StoredBoardSession>} */
   const boardSessionsById = new Map();
   /** @type {Map<string, StoredChangeRequest>} */
@@ -407,8 +423,12 @@ function createFileOrganizerStore(options) {
       }
       if (typeof event.entryLocked !== "boolean") event.entryLocked = false;
       if (event.entryLockedAtMs === undefined) event.entryLockedAtMs = null;
+      if (typeof event.boardName !== "string" || event.boardName === "") {
+        event.boardName = randomEventBoardName();
+      }
       eventsById.set(event.eventId, event);
       eventIdsByPublicId.set(event.publicId, event.eventId);
+      eventIdsByBoardName.set(event.boardName, event.eventId);
     }
     const boardSessions = readStoreFile(BOARD_SESSIONS_FILE, {
       boardSessions: [],
@@ -1499,10 +1519,15 @@ function createFileOrganizerStore(options) {
     const eventId = randomId();
     let publicId = randomPublicEventId();
     while (eventIdsByPublicId.has(publicId)) publicId = randomPublicEventId();
+    let boardName = randomEventBoardName();
+    while (eventIdsByBoardName.has(boardName)) {
+      boardName = randomEventBoardName();
+    }
     const boardSessionId = randomId();
     eventsById.set(eventId, {
       eventId,
       publicId,
+      boardName,
       reservationId: reservation.reservationId,
       organizerId: reservation.organizerId,
       name: reservation.eventName,
@@ -1522,6 +1547,7 @@ function createFileOrganizerStore(options) {
       entryLockedAtMs: null,
     });
     eventIdsByPublicId.set(publicId, eventId);
+    eventIdsByBoardName.set(boardName, eventId);
     boardSessionsById.set(boardSessionId, {
       boardSessionId,
       eventId,
@@ -2085,6 +2111,19 @@ function createFileOrganizerStore(options) {
   }
 
   /**
+   * The event behind a hosted board name, or null. Only events carry board
+   * names, so legacy boards never resolve through this index.
+   *
+   * @param {string} boardName
+   * @returns {StoredEvent | null}
+   */
+  function getEventByBoardName(boardName) {
+    ensureLoaded();
+    const eventId = eventIdsByBoardName.get(String(boardName || ""));
+    return eventId ? eventsById.get(eventId) || null : null;
+  }
+
+  /**
    * The event that belongs to an organizer, or null. Cross-organizer ids fail
    * as absent so nothing about another organizer's events leaks.
    *
@@ -2311,6 +2350,7 @@ function createFileOrganizerStore(options) {
     listPendingChangeRequests,
     getEventById,
     getEventByPublicId,
+    getEventByBoardName,
     getEventForOrganizer,
     getBoardSessionForEvent,
     listPublicDiscoverableEvents,

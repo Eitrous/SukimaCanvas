@@ -28,6 +28,17 @@ export type ServerRuntime = {
   hostedEventModule: HostedEventModule;
 };
 
+/**
+ * The admission verdict for one attempt to reach an event Board Session, by
+ * socket handshake or board page load. `role` maps onto board permission
+ * roles: moderator (Owner/Admin, Preparation Window capable), editor (member
+ * holding the account's single writable connection), reader (explicit
+ * read-only).
+ */
+export type HostedBoardAdmission = ReturnType<
+  typeof import("../server/hosted_event/admission/index.mjs").createEventAdmission
+>;
+
 export type HostedEventModule = {
   enabled: boolean;
   serveHome: HttpRouteHandler;
@@ -71,6 +82,12 @@ export type HostedEventModule = {
   serveEventPage: HttpRouteHandler;
   serveEventEnter: HttpRouteHandler;
   serveEventAnonymity: HttpRouteHandler;
+  refreshEventLifecycle: () => Promise<void>;
+  admitEventBoardSocket: HostedBoardAdmission["admitEventBoardSocket"];
+  admitEventBoardPage: HostedBoardAdmission["admitEventBoardPage"];
+  noteEventSocketConnected: HostedBoardAdmission["noteEventSocketConnected"];
+  releaseEventSocket: HostedBoardAdmission["releaseEventSocket"];
+  revalidateSocketWrite: HostedBoardAdmission["revalidateSocketWrite"];
   serveBrandAsset: HttpRouteHandler;
   serveOrganizerEvent: HttpRouteHandler;
   serveOrganizerEventAccessCode: HttpRouteHandler;
@@ -97,6 +114,12 @@ export type HttpRouteContext<
   publicUrl: URL;
   url: URL;
   params: Params;
+  /**
+   * Board permission role pre-verified by hosted admission; routes that
+   * delegate to the legacy board renderer pin it here so the renderer's
+   * capability queries honor it without re-checking hosted rules.
+   */
+  hostedBoardRole?: "moderator" | "editor" | "reader" | null;
 };
 
 export type HttpRouteHandler<
@@ -159,6 +182,17 @@ export type AppSocket = import("socket.io").Socket & {
   boardName?: string;
   boardPermissionContext?: SocketBoardPermissionContext;
   hostedEventModule?: HostedEventModule;
+  /** Admission verdict pinned by the hosted socket gate; sockets only. */
+  hostedEventAdmission?: {
+    role: "moderator" | "editor" | "reader";
+    accountId: string;
+    eventId: string;
+    publicId: string;
+    boardName: string;
+    socketId?: string;
+  };
+  /** Board permission role granted by hosted admission, when admitted. */
+  hostedBoardRole?: "moderator" | "editor" | "reader";
   replayBootstrap?: unknown;
   turnstileValidatedUntil?: number;
   client: { request: SocketRequest };

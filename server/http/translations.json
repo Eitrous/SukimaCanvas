@@ -410,7 +410,12 @@
     "hosted_event_entry_open_note": "الدخول مفتوح: يمكن للمشاركين الذين لديهم الرمز الحالي الانضمام.",
     "hosted_event_entry_lock": "قفل الدخول",
     "hosted_event_entry_unlock": "فتح الدخول",
-    "hosted_event_entry_lock_hint": "القفل يوقف كل الدخول الجديد دون إزالة أي مشارك حالي."
+    "hosted_event_entry_lock_hint": "القفل يوقف كل الدخول الجديد دون إزالة أي مشارك حالي.",
+    "hosted_event_board_link": "الدخول إلى اللوحة",
+    "hosted_event_notice_full": "الفعالية مكتملة العدد حالياً. سيتم توفير مقعد عندما يخرج أحدهم؛ حاول مرة أخرى بعد قليل.",
+    "hosted_event_notice_not_open": "اللوحة غير مفتوحة حالياً. ستفتح في وقت البدء المحدد.",
+    "hosted_event_notice_membership": "انضم إلى الفعالية برمز الدخول قبل فتح اللوحة.",
+    "hosted_event_notice_banned": "لا يمكنك الوصول إلى لوحة هذه الفعالية."
   },
   "be": {
     "white-out": "Замазка",
@@ -823,7 +828,12 @@
     "hosted_event_entry_open_note": "Уваход адкрыты: удзельнікі з бягучым кодам доступу могуць далучыцца.",
     "hosted_event_entry_lock": "Заблакаваць уваход",
     "hosted_event_entry_unlock": "Разблакаваць уваход",
-    "hosted_event_entry_lock_hint": "Блакаванне прыпыняе ўвесь новы допуск, не выдаляючы ніводнага бягучага ўдзельніка."
+    "hosted_event_entry_lock_hint": "Блакаванне прыпыняе ўвесь новы допуск, не выдаляючы ніводнага бягучага ўдзельніка.",
+    "hosted_event_board_link": "Адкрыць дошку",
+    "hosted_event_notice_full": "Мерапрыемства зараз запоўнена. Месца вызваліцца, калі хтосьці выйдзе, — паспрабуйце яшчэ раз пазней.",
+    "hosted_event_notice_not_open": "Дошка зараз не адкрыта. Яна адкрыецца ў запланированы час пачатку.",
+    "hosted_event_notice_membership": "Спачатку увайдзіце на мерапрыемства з кодам доступу, а потым адкрывайце дошку.",
+    "hosted_event_notice_banned": "Вы не маеце доступу да дошкі гэтага мерапрыемства."
   },
   "ca": {
     "white-out": "Corrector blanc",
@@ -1236,7 +1246,12 @@
     "hosted_event_entry_open_note": "L'entrada és oberta: els participants amb el codi d'accés actual poden unir-s'hi.",
     "hosted_event_entry_lock": "Bloqueja l'entrada",
     "hosted_event_entry_unlock": "Desbloqueja l'entrada",
-    "hosted_event_entry_lock_hint": "Bloquejar atura totes les noves admissions sense retirar cap participant actual."
+    "hosted_event_entry_lock_hint": "Bloquejar atura totes les noves admissions sense retirar cap participant actual.",
+    "hosted_event_board_link": "Entra al tauler",
+    "hosted_event_notice_full": "L'esdeveniment és ple en aquest moment. Un lloc queda lliure quan algú surt; torna-ho a provar d'aquí una estona.",
+    "hosted_event_notice_not_open": "El tauler no està obert en aquest moment. S'obrirà a l'hora d'inici prevista.",
+    "hosted_event_notice_membership": "Entra a l'esdeveniment amb el seu codi d'accés abans d'obrir el tauler.",
+    "hosted_event_notice_banned": "No pots accedir al tauler d'aquest esdeveniment."
   },
   "de": {
     "board_name_placeholder": "Name des Whiteboards…",
@@ -1649,7 +1664,12 @@
     "hosted_event_entry_open_note": "Der Zutritt ist offen: Teilnehmer mit dem aktuellen Zugangscode können beitreten.",
     "hosted_event_entry_lock": "Zutritt sperren",
     "hosted_event_entry_unlock": "Zutritt freigeben",
-    "hosted_event_entry_lock_hint": "Das Sperren pausiert sämtliche neuen Zugänge, ohne einen bestehenden Teilnehmer zu entfernen."
+    "hosted_event_entry_lock_hint": "Das Sperren pausiert sämtliche neuen Zugänge, ohne einen bestehenden Teilnehmer zu entfernen.",
+    "hosted_event_board_link": "Zum Whiteboard",
+    "hosted_event_notice_full": "Die Veranstaltung ist derzeit ausgelastet. Sobald jemand geht, wird ein Platz frei – versuchen Sie es gleich noch einmal.",
+    "hosted_event_notice_not_open": "Das Whiteboard ist derzeit nicht geöffnet. Es öffnet sich zur geplanten Startzeit.",
+    "hosted_event_notice_membership": "Treten Sie zuerst mit dem Zugangscode der Veranstaltung bei, bevor Sie das Whiteboard öffnen.",
+    "hosted_event_notice_banned": "Sie haben keinen Zugriff auf das Whiteboard dieser Veranstaltung."
   },
   "en": {
     "white-out": "White-out",
@@ -2062,7 +2082,12 @@
     "hosted_event_entry_open_note": "Entry is open: participants with the current access code can join.",
     "hosted_event_entry_lock": "Lock entry",
     "hosted_event_entry_unlock": "Unlock entry",
-    "hosted_event_entry_lock_hint": "Locking pauses all new admission without removing any current participant."
+    "hosted_event_entry_lock_hint": "Locking pauses all new admission without removing any current participant.",
+    "hosted_event_board_link": "Enter the board",
+    "hosted_event_notice_full": "The event is at capacity right now. A seat frees up when someone leaves — try again shortly.",
+    "hosted_event_notice_not_open": "The board is not open right now. It opens at the scheduled start time.",
+    "hosted_event_notice_membership": "Enter the event with its Access Code before opening the board.",
+    "hosted_event_notice_banned": "You cannot access this event's board."
   },
   "es": {
     "board_name_placeholder": "Nombre de la pizarra …",
@@ -2475,7 +2500,12 @@
     "hosted_event_entry_open_note": "La entrada está abierta: los participantes con el código de acceso actual pueden unirse.",
     "hosted_event_entry_lock": "Bloquear entrada",
     "hosted_event_entry_unlock": "Desbloquear entrada",
-    "hosted_event_entry_lock_hint": "Bloquear pausa todas las nuevas admisiones sin retirar a ningún participante actual."
+    "hosted_event_entry_lock_hint": "Bloquear pausa todas las nuevas admisiones sin retirar a ningún participante actual.",
+    "hosted_event_board_link": "Entrar al tablero",
+    "hosted_event_notice_full": "El evento está al máximo de su capacidad ahora mismo. Se liberará un lugar cuando alguien salga; inténtalo de nuevo en breve.",
+    "hosted_event_notice_not_open": "El tablero no está abierto en este momento. Se abre en la hora de inicio prevista.",
+    "hosted_event_notice_membership": "Entra al evento con su código de acceso antes de abrir el tablero.",
+    "hosted_event_notice_banned": "No puedes acceder al tablero de este evento."
   },
   "fr": {
     "board_name_placeholder": "Nom du tableau…",
@@ -2887,7 +2917,12 @@
     "hosted_event_entry_open_note": "L’entrée est ouverte : les participants munis du code d’accès actuel peuvent rejoindre.",
     "hosted_event_entry_lock": "Verrouiller l’entrée",
     "hosted_event_entry_unlock": "Déverrouiller l’entrée",
-    "hosted_event_entry_lock_hint": "Le verrouillage suspend toutes les nouvelles admissions sans retirer aucun participant actuel."
+    "hosted_event_entry_lock_hint": "Le verrouillage suspend toutes les nouvelles admissions sans retirer aucun participant actuel.",
+    "hosted_event_board_link": "Accéder au tableau",
+    "hosted_event_notice_full": "L’événement est actuellement complet. Une place se libère dès que quelqu’un part — réessayez dans un instant.",
+    "hosted_event_notice_not_open": "Le tableau n’est pas ouvert pour le moment. Il ouvre à l’heure de début prévue.",
+    "hosted_event_notice_membership": "Rejoignez d’abord l’événement avec son code d’accès avant d’accéder au tableau.",
+    "hosted_event_notice_banned": "Vous ne pouvez pas accéder au tableau de cet événement."
   },
   "hu": {
     "white-out": "Lefedő",
@@ -3300,7 +3335,12 @@
     "hosted_event_entry_open_note": "A belépés nyitva: a jelenlegi hozzáférési kóddal rendelkezők csatlakozhatnak.",
     "hosted_event_entry_lock": "Belépés zárolása",
     "hosted_event_entry_unlock": "Belépés feloldása",
-    "hosted_event_entry_lock_hint": "A zárolás minden új belépést felfüggeszt anélkül, hogy bárkit eltávolítana."
+    "hosted_event_entry_lock_hint": "A zárolás minden új belépést felfüggeszt anélkül, hogy bárkit eltávolítana.",
+    "hosted_event_board_link": "Belépés a táblára",
+    "hosted_event_notice_full": "Az esemény jelenleg teltházas. Amikor valaki kilép, egy hely felszabadul – próbáld újra később.",
+    "hosted_event_notice_not_open": "A tábla jelenleg nincs nyitva. Az ütemezett kezdéskor nyílik meg.",
+    "hosted_event_notice_membership": "Mielőtt belépnél a táblára, lépj be az eseményre a hozzáférési kóddal.",
+    "hosted_event_notice_banned": "Nem férsz hozzá az esemény táblájához."
   },
   "id": {
     "white-out": "Cairan koreksi",
@@ -3713,7 +3753,12 @@
     "hosted_event_entry_open_note": "Kemasukan terbuka: partisipan dengan kode akses saat ini dapat bergabung.",
     "hosted_event_entry_lock": "Kunci kemasukan",
     "hosted_event_entry_unlock": "Buka kunci kemasukan",
-    "hosted_event_entry_lock_hint": "Mengunci menghentikan semua penerimaan baru tanpa menghapus partisipan yang ada."
+    "hosted_event_entry_lock_hint": "Mengunci menghentikan semua penerimaan baru tanpa menghapus partisipan yang ada.",
+    "hosted_event_board_link": "Masuk ke papan",
+    "hosted_event_notice_full": "Acara sedang penuh saat ini. Kursi akan tersedia ketika seseorang keluar; coba lagi sebentar lagi.",
+    "hosted_event_notice_not_open": "Papan belum terbuka saat ini. Papan terbuka pada waktu mulai yang dijadwalkan.",
+    "hosted_event_notice_membership": "Masuk ke acara dengan kode aksesnya sebelum membuka papan.",
+    "hosted_event_notice_banned": "Anda tidak dapat mengakses papan acara ini."
   },
   "it": {
     "board_name_placeholder": "Nome della lavagna…",
@@ -4126,7 +4171,12 @@
     "hosted_event_entry_open_note": "L'ingresso è aperto: i partecipanti con il codice di accesso attuale possono entrare.",
     "hosted_event_entry_lock": "Blocca ingresso",
     "hosted_event_entry_unlock": "Sblocca ingresso",
-    "hosted_event_entry_lock_hint": "Il blocco mette in pausa tutte le nuove ammissioni senza rimuovere alcun partecipante attuale."
+    "hosted_event_entry_lock_hint": "Il blocco mette in pausa tutte le nuove ammissioni senza rimuovere alcun partecipante attuale.",
+    "hosted_event_board_link": "Entra nella lavagna",
+    "hosted_event_notice_full": "L'evento è attualmente al completo. Un posto si libera quando qualcuno esce: riprova tra poco.",
+    "hosted_event_notice_not_open": "La lavagna non è aperta in questo momento. Aprirà all'orario di inizio previsto.",
+    "hosted_event_notice_membership": "Entra nell'evento con il codice di accesso prima di aprire la lavagna.",
+    "hosted_event_notice_banned": "Non puoi accedere alla lavagna di questo evento."
   },
   "ja": {
     "board_name_placeholder": "ボードの名前",
@@ -4539,7 +4589,12 @@
     "hosted_event_entry_open_note": "入場は開放されています。現在のアクセスコードを持つ参加者が加入できます。",
     "hosted_event_entry_lock": "入場をロック",
     "hosted_event_entry_unlock": "入場をロック解除",
-    "hosted_event_entry_lock_hint": "ロックすると新しい入場がすべて停止しますが、既存の参加者は削除されません。"
+    "hosted_event_entry_lock_hint": "ロックすると新しい入場がすべて停止しますが、既存の参加者は削除されません。",
+    "hosted_event_board_link": "ボードに入る",
+    "hosted_event_notice_full": "イベントは現在定員に達しています。誰かが退出すると席が空きますので、しばらくしてからもう一度お試しください。",
+    "hosted_event_notice_not_open": "ボードは現在開いていません。予定された開始時刻に開きます。",
+    "hosted_event_notice_membership": "ボードに入る前に、アクセスコードでイベントに参加してください。",
+    "hosted_event_notice_banned": "このイベントのボードにはアクセスできません。"
   },
   "my": {
     "board_name_placeholder": "ဝှိုက်ဘုတ်အမည် ... ",
@@ -4952,7 +5007,12 @@
     "hosted_event_entry_open_note": "ဝင်ခွင့် ဖွင့်လှစ်ထားပါသည်- လက်ရှိကုဒ်ရှိ ပါဝင်သူများ ဝင်ရောက်နိုင်ပါသည်။",
     "hosted_event_entry_lock": "ဝင်ခွင့်ပိတ်ရန်",
     "hosted_event_entry_unlock": "ဝင်ခွင့်ပိတ်ကို ဖွင့်ရန်",
-    "hosted_event_entry_lock_hint": "ပိတ်ထားပါက လက်ရှိပါဝင်သူများကို မဖယ်ရှားဘဲ ဝင်ရောက်ခွင့်အသစ်အားလုံး ရပ်တန့်မည်။"
+    "hosted_event_entry_lock_hint": "ပိတ်ထားပါက လက်ရှိပါဝင်သူများကို မဖယ်ရှားဘဲ ဝင်ရောက်ခွင့်အသစ်အားလုံး ရပ်တန့်မည်။",
+    "hosted_event_board_link": "ဘောဒ်သို့ဝင်ရောက်မည်",
+    "hosted_event_notice_full": "ပွဲစဉ်သည် လက်ရှိတွင် အစီအရင်ပြည့်နေပါသည်။ တစ်ယောက်ယောက်ထွက်လာပါက နေရာလွတ်ရရှိမည်ဖြစ်သည်။ ခဏကြာလျှင် ထပ်မံကြိုးစားပါ။",
+    "hosted_event_notice_not_open": "ဘောဒ်သည် လက်ရှိတွင် မဖွင့်ရသေးပါ။ စတင်ရန် သတ်မှတ်ထားသောအချိန်တွင် ဖွင့်လှစ်မည်။",
+    "hosted_event_notice_membership": "ဘောဒ်ကို မဖွင့်မီ ဝင်ရောက်ရန်ကုဒ်ဖြင့် ပွဲစဉ်သို့ ဝင်ရောက်ပါ။",
+    "hosted_event_notice_banned": "ဤပွဲစဉ်၏ ဘောဒ်ကို သင် ဝင်ရောက်ခွင့် မရှိပါ။"
   },
   "pt": {
     "white-out": "Branquejar",
@@ -5365,7 +5425,12 @@
     "hosted_event_entry_open_note": "A entrada está aberta: os participantes com o código de acesso atual podem juntar-se.",
     "hosted_event_entry_lock": "Bloquear entrada",
     "hosted_event_entry_unlock": "Desbloquear entrada",
-    "hosted_event_entry_lock_hint": "Bloquear pausa todas as novas admissões sem remover qualquer participante atual."
+    "hosted_event_entry_lock_hint": "Bloquear pausa todas as novas admissões sem remover qualquer participante atual.",
+    "hosted_event_board_link": "Entrar no quadro",
+    "hosted_event_notice_full": "O evento está esgotado neste momento. Um lugar fica livre quando alguém sai — tente novamente em breve.",
+    "hosted_event_notice_not_open": "O quadro não está aberto neste momento. Abre à hora de início prevista.",
+    "hosted_event_notice_membership": "Entre no evento com o código de acesso antes de abrir o quadro.",
+    "hosted_event_notice_banned": "Não é possível aceder ao quadro deste evento."
   },
   "ru": {
     "board_name_placeholder": "Название доски",
@@ -5778,7 +5843,12 @@
     "hosted_event_entry_open_note": "Вход открыт: участники с текущим кодом доступа могут присоединиться.",
     "hosted_event_entry_lock": "Заблокировать вход",
     "hosted_event_entry_unlock": "Разблокировать вход",
-    "hosted_event_entry_lock_hint": "Блокировка приостанавливает весь новый допуск, не удаляя ни одного текущего участника."
+    "hosted_event_entry_lock_hint": "Блокировка приостанавливает весь новый допуск, не удаляя ни одного текущего участника.",
+    "hosted_event_board_link": "Открыть доску",
+    "hosted_event_notice_full": "Мероприятие сейчас заполнено до отказа. Место освободится, когда кто-нибудь уйдет, — попробуйте еще раз чуть позже.",
+    "hosted_event_notice_not_open": "Доска сейчас закрыта. Она откроется в запланированное время начала.",
+    "hosted_event_notice_membership": "Сначала войдите на мероприятие с кодом доступа, а затем открывайте доску.",
+    "hosted_event_notice_banned": "У вас нет доступа к доске этого мероприятия."
   },
   "sw": {
     "board_name_placeholder": "Jina la ubao mweupe ...",
@@ -6191,7 +6261,12 @@
     "hosted_event_entry_open_note": "Kuingia kumefunguliwa: washiriki waliokuwa na msimbo wa sasa wanaweza kujiunga.",
     "hosted_event_entry_lock": "Funga kuingia",
     "hosted_event_entry_unlock": "Fungua kuingia",
-    "hosted_event_entry_lock_hint": "Kufunga husimamisha kuingia mpya kote bila kuondoa mshiriki yeyote aliopo."
+    "hosted_event_entry_lock_hint": "Kufunga husimamisha kuingia mpya kote bila kuondoa mshiriki yeyote aliopo.",
+    "hosted_event_board_link": "Ingia ubao",
+    "hosted_event_notice_full": "Tukio hili limejaa kwa sasa. Kiti litapata wakati mtu akitoka; jaribu tena baada ya kidogo.",
+    "hosted_event_notice_not_open": "Ubao haujafunguliwa kwa sasa. Utafunguliwa wakati uliopangwa wa kuanza.",
+    "hosted_event_notice_membership": "Kwanza ingia tukio kwa msimbo wake wa kuingia kabla ya kufungua ubao.",
+    "hosted_event_notice_banned": "Huwezi kufikia ubao wa tukio hili."
   },
   "th": {
     "board_name_placeholder": "ชื่อไวท์บอร์ด ...",
@@ -6604,7 +6679,12 @@
     "hosted_event_entry_open_note": "เปิดให้เข้า: ผู้เข้าร่วมที่มีรหัสปัจจุบันสามารถเข้าร่วมได้",
     "hosted_event_entry_lock": "ล็อกการเข้า",
     "hosted_event_entry_unlock": "ปลดล็อกการเข้า",
-    "hosted_event_entry_lock_hint": "การล็อกจะหยุดการรับเข้าใหม่ทั้งหมดโดยไม่ลบผู้เข้าร่วมที่มีอยู่"
+    "hosted_event_entry_lock_hint": "การล็อกจะหยุดการรับเข้าใหม่ทั้งหมดโดยไม่ลบผู้เข้าร่วมที่มีอยู่",
+    "hosted_event_board_link": "เข้าสู่กระดาน",
+    "hosted_event_notice_full": "งานมีผู้เข้าร่วมเต็มความจุแล้วในตอนนี้ จะมีที่ว่างเมื่อมีคนออกไป โปรดลองอีกครั้งในภายหลัง",
+    "hosted_event_notice_not_open": "กระดานยังไม่เปิดในขณะนี้ จะเปิดตามเวลาเริ่มที่กำหนด",
+    "hosted_event_notice_membership": "เข้าร่วมงานด้วยรหัสเข้าร่วมก่อน จึงจะเปิดกระดานได้",
+    "hosted_event_notice_banned": "คุณไม่สามารถเข้าถึงกระดานของงานนี้ได้"
   },
   "uk": {
     "white-out": "Коректор",
@@ -7017,7 +7097,12 @@
     "hosted_event_entry_open_note": "Вхід відкрито: учасники з поточним кодом доступу можуть приєднатися.",
     "hosted_event_entry_lock": "Заблокувати вхід",
     "hosted_event_entry_unlock": "Розблокувати вхід",
-    "hosted_event_entry_lock_hint": "Блокування призупиняє весь новий допуск, не видаляючи жодного поточного учасника."
+    "hosted_event_entry_lock_hint": "Блокування призупиняє весь новий допуск, не видаляючи жодного поточного учасника.",
+    "hosted_event_board_link": "Відкрити дошку",
+    "hosted_event_notice_full": "Захід наразі заповнений. Місце звільниться, коли хтось вийде, — спробуйте ще раз трохи пізніше.",
+    "hosted_event_notice_not_open": "Дошку зараз не відкрито. Вона відкриється у запланований час початку.",
+    "hosted_event_notice_membership": "Спочатку увійдіть на захід із кодом доступу, а потім відкривайте дошку.",
+    "hosted_event_notice_banned": "Ви не маєте доступу до дошки цього заходу."
   },
   "vi": {
     "white-out": "Bút xóa",
@@ -7430,7 +7515,12 @@
     "hosted_event_entry_open_note": "Đang mở cửa: người tham gia có mã truy cập hiện tại có thể gia nhập.",
     "hosted_event_entry_lock": "Khóa lối vào",
     "hosted_event_entry_unlock": "Mở khóa lối vào",
-    "hosted_event_entry_lock_hint": "Khóa sẽ tạm dừng mọi lượt vào mới mà không xóa bất kỳ người tham gia hiện tại nào."
+    "hosted_event_entry_lock_hint": "Khóa sẽ tạm dừng mọi lượt vào mới mà không xóa bất kỳ người tham gia hiện tại nào.",
+    "hosted_event_board_link": "Vào bảng vẽ",
+    "hosted_event_notice_full": "Sự kiện hiện đã đủ sức chứa. Sẽ có chỗ trống khi có người rời đi, hãy thử lại sau.",
+    "hosted_event_notice_not_open": "Bảng vẽ hiện chưa mở. Bảng sẽ mở vào giờ bắt đầu như đã định.",
+    "hosted_event_notice_membership": "Hãy vào sự kiện bằng mã truy cập trước khi mở bảng vẽ.",
+    "hosted_event_notice_banned": "Bạn không thể truy cập bảng vẽ của sự kiện này."
   },
   "zh-CN": {
     "board_name_placeholder": "白板名称",
@@ -7843,7 +7933,12 @@
     "hosted_event_entry_open_note": "入场开放：持有当前 Access Code 的参与者可以加入。",
     "hosted_event_entry_lock": "锁定入场",
     "hosted_event_entry_unlock": "解除入场锁定",
-    "hosted_event_entry_lock_hint": "锁定会暂停所有新入场，但不会移除任何现有参与者。"
+    "hosted_event_entry_lock_hint": "锁定会暂停所有新入场，但不会移除任何现有参与者。",
+    "hosted_event_board_link": "进入画板",
+    "hosted_event_notice_full": "活动目前已满员。有人离开后会空出席位，请稍后再试。",
+    "hosted_event_notice_not_open": "画板当前未开放，将在计划开始时间开放。",
+    "hosted_event_notice_membership": "请先输入 Access Code 加入活动，再进入画板。",
+    "hosted_event_notice_banned": "你无法访问该活动的画板。"
   },
   "zh-TW": {
     "board_name_placeholder": "白板名稱",
@@ -8256,7 +8351,12 @@
     "hosted_event_entry_open_note": "入場開放：持有目前 Access Code 的參與者可以加入。",
     "hosted_event_entry_lock": "鎖定入場",
     "hosted_event_entry_unlock": "解除入場鎖定",
-    "hosted_event_entry_lock_hint": "鎖定會暫停所有新入場，但不會移除任何現有參與者。"
+    "hosted_event_entry_lock_hint": "鎖定會暫停所有新入場，但不會移除任何現有參與者。",
+    "hosted_event_board_link": "進入畫板",
+    "hosted_event_notice_full": "活動目前已滿員。有人離開後會空出席位，請稍後再試。",
+    "hosted_event_notice_not_open": "畫板目前未開放，將在計劃開始時間開放。",
+    "hosted_event_notice_membership": "請先輸入 Access Code 加入活動，再進入畫板。",
+    "hosted_event_notice_banned": "你無法存取此活動的畫板。"
   },
   "pl": {
     "board_name_placeholder": "Nazwa tablicy",
@@ -8669,6 +8769,11 @@
     "hosted_event_entry_open_note": "Wejście jest otwarte: uczestnicy z bieżącym kodem dostępu mogą dołączyć.",
     "hosted_event_entry_lock": "Zablokuj wejście",
     "hosted_event_entry_unlock": "Odblokuj wejście",
-    "hosted_event_entry_lock_hint": "Zablokowanie wstrzymuje wszystkie nowe przyjęcia bez usuwania jakiegokolwiek obecnego uczestnika."
+    "hosted_event_entry_lock_hint": "Zablokowanie wstrzymuje wszystkie nowe przyjęcia bez usuwania jakiegokolwiek obecnego uczestnika.",
+    "hosted_event_board_link": "Wejdź na tablicę",
+    "hosted_event_notice_full": "Wydarzenie jest obecnie pełne. Miejsce zwolni się, gdy ktoś wyjdzie — spróbuj ponownie za chwilę.",
+    "hosted_event_notice_not_open": "Tablica jest teraz zamknięta. Otworzy się o zaplanowanej godzinie rozpoczęcia.",
+    "hosted_event_notice_membership": "Najpierw wejdź na wydarzenie kodem dostępu, zanim otworzysz tablicę.",
+    "hosted_event_notice_banned": "Nie masz dostępu do tablicy tego wydarzenia."
   }
 }

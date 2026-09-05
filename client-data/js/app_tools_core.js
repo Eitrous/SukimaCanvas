@@ -11,7 +11,7 @@ import {
 import { createViewportController } from "./board_viewport.js";
 
 /** @import { AppInitialPreferences, ColorPreset, ServerConfig } from "../../types/app-runtime" */
-/** @typedef {{translations: {[key: string]: string}, serverConfig: ServerConfig, boardName: string, token: string | null, colorPresets: ColorPreset[], initialPreferences: AppInitialPreferences}} AppToolsCoreOptions */
+/** @typedef {{translations: {[key: string]: string}, serverConfig: ServerConfig, boardName: string, token: string | null, socketIoPath?: string, colorPresets: ColorPreset[], initialPreferences: AppInitialPreferences}} AppToolsCoreOptions */
 
 /**
  * @param {object} target
@@ -22,7 +22,11 @@ export function initializeCoreRuntime(target, options) {
   Object.assign(target, {
     i18n: new I18nModule(options.translations),
     config: new ConfigModule(options.serverConfig),
-    identity: new IdentityModule(options.boardName, options.token),
+    identity: new IdentityModule(
+      options.boardName,
+      options.token,
+      options.socketIoPath,
+    ),
     dom: new DetachedBoardDomRuntimeModule(),
     preferences: new PreferenceModule(
       options.colorPresets,

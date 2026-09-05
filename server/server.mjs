@@ -12,6 +12,7 @@ import {
   serveBoardSvg,
 } from "./routes/board_assets.mjs";
 import { redirectBoardQuery, serveBoardPage } from "./routes/board_page.mjs";
+import { serveEventBoardPage } from "./routes/hosted_board_page.mjs";
 import {
   serveAccount,
   serveAccountPassword,
@@ -299,6 +300,7 @@ function createWhiteboardHttpHandler() {
       serveOperatorRejectApplication,
       "hosted_operator_application_reject",
     ),
+    route("/b/{boardName}", serveEventBoardPage, "hosted_event_board_page"),
     route("/events/{publicId}", serveEventPage, "hosted_event_page"),
     route("/events/{publicId}/enter", serveEventEnter, "hosted_event_enter"),
     route(

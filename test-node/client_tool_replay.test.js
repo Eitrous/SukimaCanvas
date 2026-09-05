@@ -1060,6 +1060,7 @@ function createInputToolRuntime(tools) {
     identity: {
       boardName: "input-test",
       token: null,
+      socketIoPath: "",
     },
     preferences: tools.preferences,
     rateLimits: tools.rateLimits,

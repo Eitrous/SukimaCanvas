@@ -272,6 +272,10 @@ export class ConnectionModule {
           color: Tools.preferences.getColor(),
           size: String(Tools.preferences.getSize()),
         },
+        // The Hosted Event board page carries a server-computed socket.io
+        // path because its URL is not a /boards/ path; legacy pages derive it
+        // from the location.
+        Tools.identity.socketIoPath,
       );
 
       if (reusableSocket) {

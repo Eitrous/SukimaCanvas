@@ -145,6 +145,26 @@ function createEventRoutes(dependencies) {
     });
   }
 
+  /** Notices carried by the `?notice=` redirect from the board route. */
+  const EVENT_PAGE_NOTICE_KEYS = {
+    full: "hosted_event_notice_full",
+    not_open: "hosted_event_notice_not_open",
+    membership: "hosted_event_notice_membership",
+    banned: "hosted_event_notice_banned",
+  };
+
+  /**
+   * @param {string} notice
+   * @returns {string | undefined}
+   */
+  function eventPageNoticeKey(notice) {
+    return Object.prototype.hasOwnProperty.call(EVENT_PAGE_NOTICE_KEYS, notice)
+      ? EVENT_PAGE_NOTICE_KEYS[
+          /** @type {keyof typeof EVENT_PAGE_NOTICE_KEYS} */ (notice)
+        ]
+      : undefined;
+  }
+
   /**
    * The participant-facing event page reached through the Public ID. Before an
    * Access Code is verified this deliberately renders only public, non-sensitive
@@ -163,7 +183,10 @@ function createEventRoutes(dependencies) {
     if (!event) throw new BoundaryError(404, "event_not_found");
     // Advance the durable lifecycle so the displayed status is authoritative.
     await advanceLifecycleNow();
-    renderEventPage(ctx, event, 200, {});
+    const noticeParam = ctx.url.searchParams.get("notice") || "";
+    renderEventPage(ctx, event, 200, {
+      noticeKey: eventPageNoticeKey(noticeParam),
+    });
   }
 
   /**
@@ -190,6 +213,15 @@ function createEventRoutes(dependencies) {
       ? membershipStore.getMembership(event.eventId, account.accountId)
       : null;
     const session = organizerStore.getBoardSessionForEvent(event.eventId);
+    const viewerIsOwnerAdmin = account
+      ? (() => {
+          const role = organizerStore.getMemberRole(
+            event.organizerId,
+            account.accountId,
+          );
+          return role === "owner" || role === "admin";
+        })()
+      : false;
     template.serveWithStatus(ctx.request, ctx.response, statusCode, {
       hostedEventPublicId: event.publicId,
       hostedEventName: event.name,
@@ -222,7 +254,28 @@ function createEventRoutes(dependencies) {
       // New entry is offered only while the session is in its open window.
       hostedEventEnterForm:
         Boolean(account) && !membership && sessionOpen(session),
+      // The board link: members enter once the session is open; Owner/Admin
+      // also during the Preparation Window. The link is only a convenience —
+      // the board route enforces the same rules server-side.
+      hostedEventBoardHref:
+        account &&
+        (membership
+          ? sessionOpen(session)
+          : viewerIsOwnerAdmin &&
+            session !== null &&
+            (session.status === "scheduled" || session.status === "open"))
+          ? `b/${event.boardName}`
+          : undefined,
       hostedEventLoginPrompt: !account && !cancelled && lifecycle !== "ended",
+      // Owner/Admin board entry during the Preparation Window (they are not
+      // members, so the membership block above does not apply to them).
+      hostedEventOwnerBoardLink:
+        viewerIsOwnerAdmin &&
+        !membership &&
+        session !== null &&
+        (session.status === "scheduled" || session.status === "open")
+          ? `b/${event.boardName}`
+          : undefined,
       hostedEventEnterError: state.errorKey
         ? translate(template, ctx, state.errorKey)
         : undefined,

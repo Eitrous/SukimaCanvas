@@ -13,7 +13,7 @@ import { isConfiguredModerator } from "./board_moderators.mjs";
 
 /** @typedef {{AUTH_SECRET_KEY: string, BOARD_MODERATORS?: Map<string, Set<string>>}} BoardCapabilityConfig */
 /** @typedef {{name: string, readonly?: boolean, isReadOnly?: () => boolean}} BoardCapabilityBoard */
-/** @typedef {{token?: string | null, userSecret?: string | null}} BoardCapabilityUserInfo */
+/** @typedef {{token?: string | null, userSecret?: string | null, hostedRole?: "moderator" | "editor" | "reader" | null}} BoardCapabilityUserInfo */
 /** @typedef {() => boolean} IsBannedPredicate */
 /** @typedef {() => number | null} GetBanExpiresAt */
 /** @typedef {() => number | null} GetTemporaryModeratorExpiresAt */
@@ -49,13 +49,34 @@ function isClearCapableRole(role) {
   return role === "moderator";
 }
 
+/** @typedef {"moderator" | "editor" | "reader"} HostedRole */
+
 /**
+ * Narrows a pre-verified hosted role; anything else is not one.
+ *
+ * @param {unknown} value
+ * @returns {HostedRole | null}
+ */
+function normalizeHostedRole(value) {
+  return value === "moderator" || value === "editor" || value === "reader"
+    ? value
+    : null;
+}
+
+/**
+ * Resolves the compatibility role for a board. A pre-verified hosted role
+ * (pinned by Hosted Event admission from the hosted session cookie) wins over
+ * every legacy input: hosted boards never consult JWTs or configured
+ * moderator secrets, and a forged query token cannot escalate it.
+ *
  * @param {BoardCapabilityConfig} config
  * @param {string} boardName
  * @param {BoardCapabilityUserInfo | undefined} userInfo
  * @returns {"moderator" | "editor" | "reader" | "forbidden"}
  */
 function roleForBoard(config, boardName, userInfo) {
+  const hostedRole = normalizeHostedRole(userInfo?.hostedRole);
+  if (hostedRole) return hostedRole;
   if (isConfiguredModerator(config, boardName, userInfo?.userSecret))
     return "moderator";
   if (config.AUTH_SECRET_KEY === "") return "editor";
@@ -97,6 +118,11 @@ function capabilitiesGrant(capabilities, capability) {
 function forBoard(input) {
   const jwtEnabled = input.config.AUTH_SECRET_KEY !== "";
   const role = roleForBoard(input.config, input.boardName, input.userInfo);
+  // A hosted admission role is pre-verified by the Hosted Event Module and
+  // strictly stronger than the legacy role semantics: its "reader" is
+  // read-only on every board, not only on metadata-readonly ones.
+  const hostedRoleGranted =
+    normalizeHostedRole(input.userInfo?.hostedRole) !== null;
   const permanentModerator = isClearCapableRole(role);
   const fallbackIsBanned = input.isBanned || (() => false);
 
@@ -166,7 +192,7 @@ function forBoard(input) {
     if (!jwtEnabled && !accessState.moderator) {
       return {
         canOpen: true,
-        canEdit: !readonly && !accessState.banned,
+        canEdit: !readonly && !accessState.banned && !hostedReader(),
         canClear: false,
       };
     }
@@ -178,9 +204,20 @@ function forBoard(input) {
       canEdit:
         open &&
         !accessState.banned &&
+        !hostedReader() &&
         (!readonly || accessState.moderator || isEditCapableRole(role)),
       canClear: accessState.moderator,
     };
+  }
+
+  /**
+   * Whether this resolver's identity is a hosted read-only connection (an
+   * extra tab or device of a seated member).
+   *
+   * @returns {boolean}
+   */
+  function hostedReader() {
+    return hostedRoleGranted && role === "reader";
   }
 
   /**

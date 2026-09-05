@@ -8,6 +8,7 @@ import {
   resolveSignedInAccountFromRequest,
 } from "./accounts/routes.mjs";
 import { createFileAccountStore } from "./accounts/store.mjs";
+import { createEventAdmission } from "./admission/index.mjs";
 import { createFileBrandAssetStore } from "./assets/store.mjs";
 import { createEventRoutes } from "./events/routes.mjs";
 import { createFileEventMembershipStore } from "./memberships/store.mjs";
@@ -342,6 +343,30 @@ function createHostedEventModule(config, paths) {
     },
   });
 
+  // Real-time admission for event Board Sessions: the single authority that
+  // decides who may open the board, in which role, and with which seat. Both
+  // the socket layer and the hosted board page route come through it.
+  const eventAdmission = createEventAdmission({
+    seatGraceMs: config.HOSTED_SEAT_GRACE_MS,
+    preparationWindowMs: config.HOSTED_CAPACITY_WINDOW_BUFFER_MS,
+    clock,
+    accountStore: store,
+    organizerStore,
+    membershipStore,
+  });
+  /**
+   * Lazily advances the durable Board Session lifecycle so admission
+   * decisions see the authoritative status at the current service clock.
+   * Idempotent, so calling it before every admission is safe.
+   */
+  const serviceClock = clock || (() => Date.now());
+  const refreshEventLifecycle = async () => {
+    await organizerStore.advanceLifecycle({
+      now: serviceClock(),
+      closeDrainMs: config.HOSTED_BOARD_SESSION_CLOSE_DRAIN_MS,
+    });
+  };
+
   // Durable lifecycle poker: advances Board Sessions with no active reader so a
   // headless event still opens and closes on time. The persisted times plus the
   // service clock are authoritative — the interval only triggers an idempotent
@@ -387,6 +412,8 @@ function createHostedEventModule(config, paths) {
     ...reservationRoutes,
     serveEventPage: eventRoutes.serveEventPage,
     serveEventEnter: eventRoutes.serveEventEnter,
+    refreshEventLifecycle,
+    ...eventAdmission,
     serveEventAnonymity: eventRoutes.serveEventAnonymity,
     serveBrandAsset: eventRoutes.serveBrandAsset,
     serveOrganizerEvent: eventRoutes.serveOrganizerEvent,

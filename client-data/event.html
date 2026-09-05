@@ -81,6 +81,11 @@
         {{#if hostedEventMember}}
         <div class="hosted-event-membership" role="status">
           <p class="hosted-form-success">{{hostedTranslations.hosted_event_membership_active}}</p>
+          {{#if hostedEventBoardHref}}
+          <p class="hosted-event-board-entry">
+            <a class="hosted-primary-link" href="{{hostedEventBoardHref}}">{{hostedTranslations.hosted_event_board_link}}</a>
+          </p>
+          {{/if}}
           {{#if hostedEventAnonymityChangeable}}
           {{#if hostedEventMemberAnonymous}}
           <p class="hosted-account-note">{{hostedTranslations.hosted_event_anonymity_anonymous_note}}</p>
@@ -127,6 +132,12 @@
         {{else if hostedEventLoginPrompt}}
         <p class="hosted-account-alt">
           <a href="login">{{hostedTranslations.hosted_event_login_to_enter}}</a>
+        </p>
+        {{/if}}
+
+        {{#if hostedEventOwnerBoardLink}}
+        <p class="hosted-account-alt">
+          <a class="hosted-primary-link" href="{{hostedEventOwnerBoardLink}}">{{hostedTranslations.hosted_event_board_link}}</a>
         </p>
         {{/if}}
       </article>

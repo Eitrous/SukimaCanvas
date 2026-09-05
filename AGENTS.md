@@ -96,9 +96,10 @@ configured with `WBO_HOSTED_DATA_DIR`, `WBO_HOSTED_SESSION_MAX_AGE_MS`,
 revocation through it instead of sleeping.
 
 In hosted mode, Event admission lives under
-[hosted_event/events/](./server/hosted_event/events/) and
-[hosted_event/memberships/](./server/hosted_event/memberships/): the event
-routes own the Public ID event page, Access Code admission
+[hosted_event/events/](./server/hosted_event/events/),
+[hosted_event/memberships/](./server/hosted_event/memberships/), and
+[hosted_event/admission/](./server/hosted_event/admission/): the event routes
+own the Public ID event page, Access Code admission
 (`/events/{publicId}/enter`), the one-way anonymity switch
 (`/events/{publicId}/anonymity`), and Owner/Admin Access Code mint/rotation
 plus Event Lock toggling under
@@ -110,16 +111,35 @@ re-rendered. Rotation blocks future admission with the old code and keeps
 every existing membership; the Event Lock refuses all new admission while
 memberships remain. [memberships/store.mjs](./server/hosted_event/memberships/store.mjs)
 owns the durable Event Membership records (an Event/Account pair plus the
-anonymity choice), which survive refreshes, rotation, and locks; the
-anonymity choice is changeable only while the Board Session is scheduled or
-open and frozen afterwards. Admission failures render one uniform response —
-wrong code, locked, cancelled, and not-yet-open are indistinguishable — and
-attempts are rate limited per Account and per IP through
-`WBO_HOSTED_ACCESS_CODE_ATTEMPTS_*`. Public URLs carry only Event Public IDs,
-never internal event or Board Session identifiers. Hosted mode additionally
-wraps every pre-Event WBO entry surface (`/boards/*`, `/random`, raw SVG,
-preview, export, download) in `server.mjs` with a deterministic 404 and never
-redirects to a compatibility path.
+anonymity choice) and Event Bans, which survive refreshes, rotation, and
+locks; the anonymity choice is changeable only while the Board Session is
+scheduled or open and frozen afterwards. Admission failures render one
+uniform response — wrong code, locked, cancelled, and not-yet-open are
+indistinguishable — and attempts are rate limited per Account and per IP
+through `WBO_HOSTED_ACCESS_CODE_ATTEMPTS_*`. Public URLs carry only Event
+Public IDs and event board names, never internal event or Board Session
+identifiers. Hosted mode additionally wraps every pre-Event WBO entry surface
+(`/boards/*`, `/random`, raw SVG, preview, export, download) in `server.mjs`
+with a deterministic 404 and never redirects to a compatibility path.
+
+Real-time access to an event's Board Session is owned by
+[hosted_event/admission/](./server/hosted_event/admission/): each event
+carries an unguessable board name (`event-<hex>`), and `/b/{boardName}` is the
+only hosted page that renders the real WBO board (delegating to the legacy
+board renderer with the role pinned on the context). The same admission
+module gates every Socket.IO handshake — legacy board names are refused, and
+role ("moderator" for Owner/Admin including the Preparation Window, "editor"
+for a member holding the account's single writable connection, "reader" for
+its extra tabs) is pinned on the socket and consumed by
+[board_capabilities.mjs](./server/auth/board_capabilities.mjs) instead of
+JWTs. Participant Seats count distinct Accounts per Event against the Board
+Session's approved capacity, survive a 10-minute reconnect grace
+(`WBO_HOSTED_SEAT_GRACE_MS`) after an account's last connection drops, and
+promote a companion tab to writer on writer loss; persistent writes are
+revalidated live (lifecycle, ban, writer slot) per message through
+`revalidateSocketWrite`. Hosted mode also blocks the Download tool through
+`BLOCKED_TOOLS`, and the board shell embeds its board identity
+(`board-identity` JSON) so the client boots correctly on non-`/boards/` URLs.
 
 Every HTTP request passes through [dispatch.mjs](./server/http/dispatch.mjs),
 where URL validation, route matching, route-level access checks, request

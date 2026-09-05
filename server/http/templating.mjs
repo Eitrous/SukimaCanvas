@@ -2,12 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import handlebars from "handlebars";
-
+import { MODERATION_RULES } from "../../client-data/js/moderation_rules.js";
 import {
   boardStateGrantsCapability,
   TOOLBAR_TOOLS,
 } from "../../client-data/tools/manifest.js";
-import { MODERATION_RULES } from "../../client-data/js/moderation_rules.js";
 import { createClientConfiguration } from "./client_configuration.mjs";
 import { startCompressedResponse } from "./compression.mjs";
 import { parseRequestUrl } from "./request_url.mjs";
@@ -528,6 +527,14 @@ class BoardTemplate extends Template {
       .href;
     params.boardUriComponent = boardUriComponent;
     params.board = decodeURIComponent(boardUriComponent);
+    // The browser may reach this shell through a URL that is not a /boards/
+    // path (the Hosted Event board page), so the client boot prefers the
+    // server-computed identity over deriving it from the location.
+    params.socketIoPath = `${this.serverConfig?.BASE_PATH || ""}/socket.io`;
+    params.boardIdentity = {
+      board: params.board,
+      socketIoPath: params.socketIoPath,
+    };
     params.canonicalUrl = localizedUrl(boardBaseUrl, params.language);
     params.languageLinks = localizedLinks(params.languages, (linkLanguage) =>
       localizedUrl(boardBaseUrl, linkLanguage),
@@ -662,8 +669,8 @@ class RulesTemplate extends Template {
 
 export {
   BoardTemplate,
+  localizedHref,
   RulesTemplate,
   StaticTemplate,
   Template,
-  localizedHref,
 };

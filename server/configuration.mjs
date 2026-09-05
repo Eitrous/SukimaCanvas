@@ -3,8 +3,8 @@ import path from "node:path";
 import {
   parseBasePathEnv,
   parseBoardModeratorsEnv,
-  parseCommaSeparatedEnv,
   parseBooleanEnv,
+  parseCommaSeparatedEnv,
   parseDisabledFlagEnv,
   parseEmailListEnv,
   parseEnumEnv,
@@ -201,6 +201,17 @@ export const HOSTED_ACCESS_CODE_ATTEMPTS_WINDOW_MS = parseIntegerEnv(
 );
 
 /**
+ * How long a Participant Seat stays reserved for its Account after the
+ * Account's last live connection drops. Reconnecting inside the window
+ * restores the seat without contending for capacity; after it expires the
+ * seat is released and must be re-acquired while capacity remains.
+ */
+export const HOSTED_SEAT_GRACE_MS = parseIntegerEnv(
+  "WBO_HOSTED_SEAT_GRACE_MS",
+  10 * 60 * 1000,
+);
+
+/**
  * Drain window between a Board Session entering CLOSING and being sealed CLOSED,
  * during which accepted writes are flushed before the archive is produced.
  */
@@ -344,8 +355,18 @@ export const IP_SOURCE = IP_CONFIGURATION.IP_SOURCE;
 /** Number of trusted proxy hops when `WBO_IP_SOURCE` uses forwarded headers. */
 export const TRUST_PROXY_HOPS = IP_CONFIGURATION.TRUST_PROXY_HOPS;
 
-/** Comma-separated blocked tool ids. */
-export const BLOCKED_TOOLS = parseCommaSeparatedEnv("WBO_BLOCKED_TOOLS");
+/**
+ * Comma-separated blocked tool ids. Hosted mode always blocks the Download
+ * tool: participants never get raw SVG downloads, and the hosted board page
+ * plus socket admission enforce the same list server-side.
+ */
+const PARSED_BLOCKED_TOOLS = parseCommaSeparatedEnv("WBO_BLOCKED_TOOLS").filter(
+  (tool) => tool !== "",
+);
+export const BLOCKED_TOOLS =
+  HOSTED_MODE === true && !PARSED_BLOCKED_TOOLS.includes("download")
+    ? [...PARSED_BLOCKED_TOOLS, "download"]
+    : PARSED_BLOCKED_TOOLS;
 
 /** Comma-separated blocked selection button ids. */
 export const BLOCKED_SELECTION_BUTTONS = parseCommaSeparatedEnv(
