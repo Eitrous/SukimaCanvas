@@ -42,6 +42,8 @@ export type MessageMetadata = {
   socket?: string;
   userId?: string;
   clientMutationId?: string;
+  /** Server-stamped opaque creator identity on item-creating mutations. */
+  createdBy?: string;
 };
 
 export type RequiredPointMessageFields = {

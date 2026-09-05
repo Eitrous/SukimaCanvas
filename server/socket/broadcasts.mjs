@@ -6,7 +6,10 @@ import {
 } from "../../client-data/js/message_tool_metadata.js";
 import { SocketEvents } from "../../client-data/js/socket_events.js";
 import { Cursor } from "../../client-data/tools/index.js";
-import { getBoardSession } from "../board/session.mjs";
+import {
+  getBoardSession,
+  LEDGER_UNAVAILABLE_REASON,
+} from "../board/session.mjs";
 import observability from "../observability/index.mjs";
 import {
   boardCapabilitiesForSocket,
@@ -33,6 +36,7 @@ const { logger, metrics, tracing } = observability;
  *   getSocketUserName: (socket: AppSocket, clientIp: string) => string,
  *   isSyncedPersistentSocket: (socket: AppSocket) => boolean,
  *   resolveClientIp: (socket: AppSocket, boardName: string, config: ServerConfig) => string,
+ *   discardBoardInstance?: (board: BoardData, details?: {[key: string]: unknown}) => Promise<boolean>,
  * }} SocketBroadcastRuntime
  */
 
@@ -129,6 +133,43 @@ function emitPersistentBoardFollowupMutations(
       runtime,
     );
   });
+}
+
+/**
+ * Resolves the server-authoritative operator for a persistent hosted write
+ * from the admission verdict pinned at handshake (hosted session cookie →
+ * Account → Event Membership → Board Session → role). The verdict was live-
+ * revalidated by the capability check before this point; clients can supply
+ * none of these fields. A hosted socket without a complete verdict is an
+ * invariant violation and fails the write loudly instead of silently falling
+ * back to unattributed acceptance.
+ *
+ * @param {AppSocket} socket
+ * @returns {{eventId: string, boardSessionId: string, accountId: string, participantId: string} | undefined}
+ */
+function hostedOperatorForSocket(socket) {
+  const admission = socket.hostedEventAdmission;
+  const hosted = socket.hostedEventModule;
+  if (hosted?.enabled !== true) return undefined;
+  if (
+    !admission ||
+    typeof admission.accountId !== "string" ||
+    typeof admission.eventId !== "string" ||
+    typeof admission.participantId !== "string" ||
+    typeof admission.boardSessionId !== "string" ||
+    admission.accountId === "" ||
+    admission.eventId === "" ||
+    admission.participantId === "" ||
+    admission.boardSessionId === ""
+  ) {
+    throw new Error("hosted socket write without a complete admission verdict");
+  }
+  return {
+    eventId: admission.eventId,
+    boardSessionId: admission.boardSessionId,
+    accountId: admission.accountId,
+    participantId: admission.participantId,
+  };
 }
 
 /**
@@ -358,6 +399,7 @@ async function persistBoardBroadcast(
   const handleResult = await getBoardSession(board).acceptPersistentMutation(
     data,
     now,
+    hostedOperatorForSocket(socket),
   );
   if (handleResult.ok === false) {
     rejectBoardMessageWrite(
@@ -375,6 +417,15 @@ async function persistBoardBroadcast(
       handleResult.followup,
       runtime,
     );
+    if (handleResult.reason === LEDGER_UNAVAILABLE_REASON) {
+      // The mutated board instance is stale by definition: its memory holds
+      // a mutation the durable ledger never confirmed. Drop it so every
+      // client reloads from snapshot plus ledger instead of keeping state
+      // that must not exist.
+      await runtime.discardBoardInstance?.(board, {
+        logEvent: "board.ledger_failure_dropped",
+      });
+    }
     return;
   }
   if (handleResult.value !== data) {

@@ -136,6 +136,9 @@ function createWhiteboardHttpHandler() {
       "preview_board",
       {
         access: "user",
+        // Hosted mode rejects these surfaces with a deterministic 404 before
+        // any auth decision, keeping the legacy entry contract uniform.
+        hostedOpenAccess: true,
       },
     ),
     route(
@@ -144,6 +147,7 @@ function createWhiteboardHttpHandler() {
       "random_board",
       {
         access: "user",
+        hostedOpenAccess: true,
       },
     ),
     route("/rules", serveRulesPage, "rules"),
@@ -319,7 +323,7 @@ function createWhiteboardHttpHandler() {
  * @param {string} prefix
  * @param {import("../types/server-runtime.d.ts").HttpRouteHandler} handler
  * @param {string} routeName
- * @param {{access?: "none" | "user"}=} options
+ * @param {{access?: "none" | "user", hostedOpenAccess?: boolean}=} options
  */
 function boardNameRouteGroup(prefix, handler, routeName, options) {
   return [
@@ -348,7 +352,7 @@ function withHostedRejection(handler) {
 /**
  * @param {string} prefix
  * @param {string} routeName
- * @param {{access?: "none" | "user"}=} options
+ * @param {{access?: "none" | "user", hostedOpenAccess?: boolean}=} options
  */
 function missingBoardNameRoutes(prefix, routeName, options) {
   return [

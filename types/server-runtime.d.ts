@@ -189,6 +189,10 @@ export type AppSocket = import("socket.io").Socket & {
     eventId: string;
     publicId: string;
     boardName: string;
+    /** Opaque, event-scoped creator identity for items this account creates. */
+    participantId: string;
+    boardSessionId: string;
+    seats: number;
     socketId?: string;
   };
   /** Board permission role granted by hosted admission, when admitted. */

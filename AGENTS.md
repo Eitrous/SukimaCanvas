@@ -141,6 +141,18 @@ revalidated live (lifecycle, ban, writer slot) per message through
 `BLOCKED_TOOLS`, and the board shell embeds its board identity
 (`board-identity` JSON) so the client boots correctly on non-`/boards/` URLs.
 
+Hosted mode fail-closes at boot when `AUTH_SECRET_KEY` is empty: participant
+identifier derivation needs a stable deployment secret. Every accepted
+persistent write is operator-resolved server-side (hosted session → Account →
+Event Membership → Board Session → pinned role) and stamped with an opaque,
+event-scoped Participant Identifier ([attribution.mjs](./server/hosted_event/attribution.mjs))
+— never an email or Account id — which becomes the item's immutable
+`createdBy` (top-level canonical field, stored as `data-wbo-created-by` in
+SVG, round-tripped centrally through [stored_svg_item_codec.mjs](./server/persistence/stored_svg_item_codec.mjs)).
+Copies attribute to the copier while keeping their source relation; updates
+never change `createdBy`. Message normalization drops client-supplied
+attribution fields, so the browser can never forge an author.
+
 Every HTTP request passes through [dispatch.mjs](./server/http/dispatch.mjs),
 where URL validation, route matching, route-level access checks, request
 observation, and error responses are wired together. Supporting HTTP behavior is
@@ -269,7 +281,14 @@ Client `broadcast` messages enter
    [data.mjs](./server/board/data.mjs) through
    [message_processing.mjs](./server/board/message_processing.mjs), record it in
    [mutation_log.mjs](./server/board/mutation_log.mjs), and emit sequenced
-   `broadcast` frames to synced clients and the sender.
+   `broadcast` frames to synced clients and the sender. In hosted mode the
+   session also resolves the server-authoritative operator, stamps the
+   operator's `createdBy` onto item-creating mutations, deduplicates accepted
+   `clientMutationId`s (retries re-confirm the original entry), and durably
+   appends the entry to the board's mutation ledger before the sender is
+   confirmed; a failed ledger append rejects the write (`ledger_unavailable`)
+   and drops the mutated board instance so it reloads from snapshot plus
+   ledger. Legacy mode skips all of this and keeps in-memory-only logging.
 
 [presence.mjs](./server/socket/presence.mjs) tracks connected board users,
 [reports.mjs](./server/socket/reports.mjs) handles user reports,
@@ -296,7 +315,13 @@ tracks the SVG extent. Mutation application stays in
 [data_persistence.mjs](./server/board/data_persistence.mjs) owns autosave
 scheduling, load, save, unload, and stale-save handling.
 
-On disk, stored SVG is authoritative. [svg_board_store.mjs](./server/persistence/svg_board_store.mjs)
+On disk, stored SVG is authoritative, and in hosted mode the durable
+mutation ledger is the authoritative post-snapshot history: board loads
+hydrate ledger entries newer than the snapshot sequence
+(`board.ledger_hydrated`), the ledger stays append-only for the Board
+Session's lifetime (retention is later work building on it), and ledger
+corruption or a replay gap fails the load instead of silently diverging.
+[svg_board_store.mjs](./server/persistence/svg_board_store.mjs)
 reads served baselines, loads canonical board state, writes fresh SVGs, and
 rewrites existing SVGs. It relies on
 [streaming_stored_svg_scan.mjs](./server/persistence/streaming_stored_svg_scan.mjs)
@@ -309,6 +334,16 @@ for legacy JSON conversion. Persistence paths and timing are configured through
 `WBO_HISTORY_DIR`, `WBO_SAVE_INTERVAL`, `WBO_MAX_SAVE_DELAY`, and
 `WBO_SEQ_REPLAY_RETENTION_MS`. Board moderators are configured with
 `WBO_BOARD_MODERATORS` as space-separated `board:secret[,secret]` groups.
+
+The durable mutation ledger lives under
+[hosted_event/ledger/](./server/hosted_event/ledger/) with one JSONL file per
+board in `<WBO_HOSTED_DATA_DIR>/mutation-ledger/<board>.jsonl`; each entry
+carries `seq`, `acceptedAtMs`, `eventId`, `boardSessionId`, the internal
+`accountId`, and the full attributed mutation. The board layer reaches it
+through the factory seam in
+[ledger_registry.mjs](./server/board/ledger_registry.mjs), which the hosted
+module registers at composition — a future PostgreSQL adapter slots in
+without touching the acceptance flow.
 
 ### tests, benchmarks, and profiling
 
@@ -533,11 +568,21 @@ Important files:
 - Persistent socket writes flow through policy, rate limits, the per-board
   session, board mutation application, mutation-log recording, and sequenced
   broadcasts. Cursor messages are ephemeral and are not persisted or replayed.
+- Hosted item attribution is server-authoritative end to end: the operator is
+  resolved from the hosted session and admission verdict, `createdBy` is
+  stamped at acceptance from an opaque participant identifier, and updates,
+  copies, and replayed ledger entries can never rewrite an item's creator.
+- In hosted mode an accepted persistent write is durable before it is
+  confirmed: the ledger append (fsync) gates the sequenced broadcast, a
+  ledger failure rejects the write and drops the mutated board instance, and
+  loads replay ledger entries past the stored SVG snapshot. Ledger history is
+  never silently skipped; corruption fails the load loudly.
 - Connection replay starts from the SVG baseline sequence attached to the page.
   Reconnects refresh the authoritative SVG baseline before opening a new socket
   when replay is not possible.
-- Canonical board items store scalar fields in `attrs`, `transform` once at the
-  item top level, and payload-specific state under `payload`.
+- Canonical board items store scalar fields in `attrs`, `transform` once at
+  the item top level, server-stamped `createdBy` as the only other top-level
+  scalar, and payload-specific state under `payload`.
 - Stored SVG is authoritative. `.svg.bak` is a transient save staging file, and
   unreadable primary SVGs are quarantined before fallback. Legacy `.json`
   boards are migration inputs, not the steady-state format.

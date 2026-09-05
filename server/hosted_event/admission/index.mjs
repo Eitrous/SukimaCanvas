@@ -37,12 +37,26 @@ const { logger } = observability;
  *   accountStore: ReturnType<typeof import("../accounts/store.mjs").createFileAccountStore>,
  *   organizerStore: ReturnType<typeof import("../organizers/store.mjs").createFileOrganizerStore>,
  *   membershipStore: ReturnType<typeof import("../memberships/store.mjs").createFileEventMembershipStore>,
+ *   participantIdentifierFor: (eventId: string, accountId: string) => string,
  *   clock?: () => number,
  * }} dependencies
  */
 function createEventAdmission(dependencies) {
   const { accountStore, organizerStore, membershipStore } = dependencies;
   const clock = dependencies.clock || (() => Date.now());
+  // The participant identifier is the opaque, event-scoped creator identity
+  // stamped onto accepted board items. It is resolved here so every admitted
+  // connection carries its attribution identity without ever exposing the
+  // internal Account id on items or broadcasts. Required, not defaulted: an
+  // admission module without one must not compose.
+  const participantIdentifierFor =
+    typeof dependencies.participantIdentifierFor === "function"
+      ? dependencies.participantIdentifierFor
+      : function missingParticipantIdentifierResolver() {
+          throw new Error(
+            "createEventAdmission requires participantIdentifierFor",
+          );
+        };
   const seats = createSeatRegistry({
     clock,
     graceMs: dependencies.seatGraceMs,
@@ -109,7 +123,7 @@ function createEventAdmission(dependencies) {
    *   boardName: string,
    *   cookieHeader: string | undefined,
    * }} input
-   * @returns {{ok: true, role: "moderator" | "editor" | "reader", accountId: string, eventId: string, publicId: string, boardName: string, seats: number} | {ok: false, reason: string}}
+   * @returns {{ok: true, role: "moderator" | "editor" | "reader", accountId: string, eventId: string, publicId: string, boardName: string, participantId: string, boardSessionId: string, seats: number} | {ok: false, reason: string}}
    */
   function admitEventBoard(input) {
     const boardName = String(input.boardName || "");
@@ -151,6 +165,11 @@ function createEventAdmission(dependencies) {
         eventId: event.eventId,
         publicId: event.publicId,
         boardName: event.boardName,
+        participantId: participantIdentifierFor(
+          event.eventId,
+          account.accountId,
+        ),
+        boardSessionId: session.boardSessionId,
         seats: session.seats,
       };
     }
@@ -190,6 +209,8 @@ function createEventAdmission(dependencies) {
       eventId: event.eventId,
       publicId: event.publicId,
       boardName: event.boardName,
+      participantId: participantIdentifierFor(event.eventId, account.accountId),
+      boardSessionId: session.boardSessionId,
       seats: session.seats,
     };
   }

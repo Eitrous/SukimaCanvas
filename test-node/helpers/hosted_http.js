@@ -27,6 +27,9 @@ async function createHostedServer(overrides = {}) {
       HISTORY_DIR: historyDir,
       WEBROOT: CLIENT_WEBROOT,
       HOSTED_MODE: true,
+      // Hosted mode fail-closes without a deployment secret: participant
+      // identifier derivation requires one, exactly like production.
+      AUTH_SECRET_KEY: "hosted-test-secret",
       HOSTED_DATA_DIR: path.join(root, "hosted-data"),
       // Node integration tests drive lifecycle advancement through requests, so
       // the background poker stays off unless a test opts in.

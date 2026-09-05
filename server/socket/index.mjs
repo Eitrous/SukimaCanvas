@@ -592,6 +592,18 @@ const socketBroadcastRuntime = {
   ) {
     return syncedPersistentSockets.has(socket.id);
   },
+  // A board whose accepted mutation failed its durable ledger write holds
+  // state that must not exist; dropping the instance disconnects its sockets
+  // and the next connection reloads from snapshot plus ledger.
+  discardBoardInstance: function discardBoardInstance(
+    /** @type {BoardData} */ board,
+    /** @type {{logEvent?: string} | undefined} */ details,
+  ) {
+    return dropLoadedBoardInstance(board, {
+      reason: "ledger_unavailable",
+      ...details,
+    });
+  },
 };
 
 /**

@@ -154,6 +154,11 @@ export async function startTestServer(
   } else {
     delete env.AUTH_SECRET_KEY;
   }
+  // Hosted mode fail-closes without a deployment secret: participant
+  // identifier derivation requires one, exactly like production.
+  if (env.WBO_HOSTED_MODE === "true" && !env.AUTH_SECRET_KEY) {
+    env.AUTH_SECRET_KEY = AUTH_SECRET;
+  }
 
   const serverPath = path.resolve("server", "server.mjs");
   const child = spawn("node", [serverPath], {

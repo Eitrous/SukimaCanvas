@@ -11,6 +11,9 @@ const {
   createEventAdmission,
 } = require("../server/hosted_event/admission/index.mjs");
 const {
+  createParticipantIdentifierResolver,
+} = require("../server/hosted_event/attribution.mjs");
+const {
   createFileOrganizerStore,
 } = require("../server/hosted_event/organizers/store.mjs");
 const {
@@ -78,6 +81,8 @@ async function createHarness() {
     accountStore,
     organizerStore,
     membershipStore,
+    participantIdentifierFor:
+      createParticipantIdentifierResolver("seat-test-secret"),
     clock,
   });
   return { holder, accountStore, organizerStore, membershipStore, admission };

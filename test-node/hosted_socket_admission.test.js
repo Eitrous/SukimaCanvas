@@ -12,12 +12,28 @@ const {
   createEventAdmission,
 } = require("../server/hosted_event/admission/index.mjs");
 const {
+  createParticipantIdentifierResolver,
+} = require("../server/hosted_event/attribution.mjs");
+const {
+  createFileBoardMutationLedger,
+} = require("../server/hosted_event/ledger/store.mjs");
+const {
   createFileOrganizerStore,
 } = require("../server/hosted_event/organizers/store.mjs");
 const {
   createFileEventMembershipStore,
 } = require("../server/hosted_event/memberships/store.mjs");
+const {
+  registerBoardMutationLedgerFactory,
+  resetBoardMutationLedgerFactory,
+} = require("../server/board/ledger_registry.mjs");
 const { MutationType } = require("../client-data/js/mutation_type.js");
+
+// The ledger factory is process-global; restore the no-ledger default once
+// this file's tests are done.
+test.after(() => {
+  resetBoardMutationLedgerFactory();
+});
 
 /**
  * @param {Array<{event: string, payload: any}>} emitted
@@ -58,8 +74,16 @@ async function createAdmissionFixture(now) {
     accountStore,
     organizerStore,
     membershipStore,
+    participantIdentifierFor: createParticipantIdentifierResolver(
+      "test-attribution-secret",
+    ),
     clock,
   });
+  // Hosted composition registers the durable mutation ledger factory; the
+  // socket scenario replicates it so accepted writes pass the same gate.
+  registerBoardMutationLedgerFactory((boardName) =>
+    createFileBoardMutationLedger({ boardName, dataDir }),
+  );
   // The exact surface the socket layer consumes through
   // socket.hostedEventModule in hosted mode.
   const hostedModule = { enabled: true, ...admission };

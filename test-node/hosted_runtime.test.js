@@ -57,6 +57,7 @@ test("hosted mode serves localized home and versioned corresponding source", asy
       HISTORY_DIR: historyDir,
       WEBROOT: CLIENT_WEBROOT,
       HOSTED_MODE: true,
+      AUTH_SECRET_KEY: "hosted-test-secret",
       DEPLOYMENT_VERSION: "2026.09.02+abc123",
       CORRESPONDING_SOURCE_URL:
         "https://code.example.test/sukimacanvas/tree/{version}",
@@ -127,6 +128,7 @@ test("source page clearly reports an unavailable deployment mapping", async () =
       HISTORY_DIR: historyDir,
       WEBROOT: CLIENT_WEBROOT,
       HOSTED_MODE: true,
+      AUTH_SECRET_KEY: "hosted-test-secret",
       DEPLOYMENT_VERSION: "",
       CORRESPONDING_SOURCE_URL: "",
     }),
@@ -158,6 +160,7 @@ test("source page rejects rolling source URLs", async () => {
       HISTORY_DIR: historyDir,
       WEBROOT: CLIENT_WEBROOT,
       HOSTED_MODE: true,
+      AUTH_SECRET_KEY: "hosted-test-secret",
       DEPLOYMENT_VERSION: "main",
       CORRESPONDING_SOURCE_URL:
         "https://code.example.test/sukimacanvas/tree/{version}",

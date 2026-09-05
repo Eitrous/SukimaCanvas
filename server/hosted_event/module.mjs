@@ -1,5 +1,6 @@
 import { localizedHref, Template } from "../http/templating.mjs";
 import observability from "../observability/index.mjs";
+import { registerBoardMutationLedgerFactory } from "../board/ledger_registry.mjs";
 import { createHostedCaptcha } from "./accounts/captcha.mjs";
 import { createOutboxMailDelivery } from "./accounts/mail.mjs";
 import { createRateLimiter } from "./accounts/rate_limits.mjs";
@@ -8,9 +9,11 @@ import {
   resolveSignedInAccountFromRequest,
 } from "./accounts/routes.mjs";
 import { createFileAccountStore } from "./accounts/store.mjs";
+import { createParticipantIdentifierResolver } from "./attribution.mjs";
 import { createEventAdmission } from "./admission/index.mjs";
 import { createFileBrandAssetStore } from "./assets/store.mjs";
 import { createEventRoutes } from "./events/routes.mjs";
+import { createFileBoardMutationLedger } from "./ledger/store.mjs";
 import { createFileEventMembershipStore } from "./memberships/store.mjs";
 import { createOrganizerRoutes } from "./organizers/routes.mjs";
 import { createFileOrganizerStore } from "./organizers/store.mjs";
@@ -346,6 +349,18 @@ function createHostedEventModule(config, paths) {
   // Real-time admission for event Board Sessions: the single authority that
   // decides who may open the board, in which role, and with which seat. Both
   // the socket layer and the hosted board page route come through it.
+  // Hosted mode fail-closes on a missing deployment secret: without it the
+  // service cannot derive stable participant identifiers, so it cannot honor
+  // the trusted-attribution contract and must not boot. Legacy mode never
+  // resolves an operator, so its placeholder resolver must never be invoked.
+  const participantIdentifierFor =
+    config.HOSTED_MODE === true
+      ? createParticipantIdentifierResolver(config.AUTH_SECRET_KEY)
+      : function legacyAttributionDisabled() {
+          throw new Error(
+            "participant identifiers require WBO_HOSTED_MODE with AUTH_SECRET_KEY",
+          );
+        };
   const eventAdmission = createEventAdmission({
     seatGraceMs: config.HOSTED_SEAT_GRACE_MS,
     preparationWindowMs: config.HOSTED_CAPACITY_WINDOW_BUFFER_MS,
@@ -353,7 +368,20 @@ function createHostedEventModule(config, paths) {
     accountStore: store,
     organizerStore,
     membershipStore,
+    participantIdentifierFor,
   });
+  if (config.HOSTED_MODE === true) {
+    // Durable mutation ledger: every accepted persistent write on a hosted
+    // board is fsynced into `<HOSTED_DATA_DIR>/mutation-ledger/<board>.jsonl`
+    // before its sender is confirmed. The stored SVG stays a rebuildable
+    // projection; loads replay ledger entries past the snapshot sequence.
+    registerBoardMutationLedgerFactory((boardName) =>
+      createFileBoardMutationLedger({
+        boardName,
+        dataDir: config.HOSTED_DATA_DIR,
+      }),
+    );
+  }
   /**
    * Lazily advances the durable Board Session lifecycle so admission
    * decisions see the authoritative status at the current service clock.
