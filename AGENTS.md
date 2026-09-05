@@ -122,6 +122,34 @@ identifiers. Hosted mode additionally wraps every pre-Event WBO entry surface
 (`/boards/*`, `/random`, raw SVG, preview, export, download) in `server.mjs`
 with a deterministic 404 and never redirects to a compatibility path.
 
+Organizer-backend integration lives under
+[hosted_event/integrations/](./server/hosted_event/integrations/): API
+Credential administration (create, rotate, revoke) is Owner-only on the
+organizer manage page under `/organizers/{organizerId}/credentials*`, and the
+versioned machine API is exactly `GET /api/v1/events/{publicId}` (lifecycle
+query) and `POST /api/v1/events/{publicId}/entry-grants`, both authenticated
+by an `Authorization: Bearer <credentialId>.<secret>` header. Only a SHA-256
+digest of the full bearer value is stored; the raw secret is revealed exactly
+once at creation or rotation, rotation invalidates the previous bearer value
+but not grants it already issued, and revocation invalidates both immediately.
+Every endpoint scopes through the credential's own organizer — another
+organizer's event is indistinguishable from a missing one — and grant
+creation is rate limited per credential (`WBO_HOSTED_API_ENTRY_GRANT_*`).
+Entry Grants are 10-minute, single-use tokens
+(`WBO_HOSTED_ENTRY_GRANT_TTL_MS`) that travel to the participant's browser
+only in the redirect URL's fragment; [hosted-entry-grant.js](./client-data/hosted-entry-grant.js)
+redeems them with one authenticated POST to `/events/{publicId}/entry-grant`
+(never in query, path, referrer, or ordinary access logs), clearing the
+fragment immediately and stashing a pending grant in sessionStorage until a
+signed-out participant completes Hosted Account login. Redemption is one
+uniform deterministic failure for expired, reused, revoked-credential,
+foreign-event, malformed, banned, locked, and not-yet-open cases — Event
+Ban, the Entry Lock, the Board Session lifecycle, and seat capacity all
+precede a valid grant — and attempts are rate limited per Account and per IP
+(`WBO_HOSTED_ENTRY_GRANT_ATTEMPTS_*`). The optional External Participant
+Reference is opaque, control-character-stripped, length-capped, and never
+influences admission or identity.
+
 Real-time access to an event's Board Session is owned by
 [hosted_event/admission/](./server/hosted_event/admission/): each event
 carries an unguessable board name (`event-<hex>`), and `/b/{boardName}` is the

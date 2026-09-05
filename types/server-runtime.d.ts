@@ -111,6 +111,12 @@ export type HostedEventModule = {
   serveOrganizerEventModerators: HttpRouteHandler;
   serveOrganizerEventModeratorRevoke: HttpRouteHandler;
   serveOrganizerEventCover: HttpRouteHandler;
+  serveOrganizerCredentialCreate: HttpRouteHandler;
+  serveOrganizerCredentialRotate: HttpRouteHandler;
+  serveOrganizerCredentialRevoke: HttpRouteHandler;
+  serveEventEntryGrantRedeem: HttpRouteHandler;
+  serveIntegrationApiEvent: HttpRouteHandler;
+  serveIntegrationApiEntryGrantCreate: HttpRouteHandler;
 };
 
 export type ObservedHttpRequest = {

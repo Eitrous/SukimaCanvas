@@ -25,8 +25,11 @@ import {
   serveCancelReservation,
   serveEventAnonymity,
   serveEventEnter,
+  serveEventEntryGrantRedeem,
   serveEventPage,
   serveForgot,
+  serveIntegrationApiEntryGrantCreate,
+  serveIntegrationApiEvent,
   serveLogin,
   serveLogout,
   serveOperatorApplication,
@@ -43,6 +46,9 @@ import {
   serveOperatorReservations,
   serveOrganizerApply,
   serveOrganizerConsole,
+  serveOrganizerCredentialCreate,
+  serveOrganizerCredentialRevoke,
+  serveOrganizerCredentialRotate,
   serveOrganizerEvent,
   serveOrganizerEventAccessCode,
   serveOrganizerEventCover,
@@ -267,6 +273,34 @@ function createWhiteboardHttpHandler() {
       serveOrganizerEventCover,
       "hosted_organizer_event_cover",
     ),
+    route(
+      "/organizers/{organizerId}/credentials",
+      serveOrganizerCredentialCreate,
+      "hosted_organizer_credential_create",
+    ),
+    route(
+      "/organizers/{organizerId}/credentials/{credentialId}/rotate",
+      serveOrganizerCredentialRotate,
+      "hosted_organizer_credential_rotate",
+    ),
+    route(
+      "/organizers/{organizerId}/credentials/{credentialId}/revoke",
+      serveOrganizerCredentialRevoke,
+      "hosted_organizer_credential_revoke",
+    ),
+    // The versioned integration API for organizer backends: credential-
+    // authenticated, organizer-scoped. Browser Entry Grant redemption sits
+    // with the other event-page flows below.
+    route(
+      "/api/v1/events/{publicId}",
+      serveIntegrationApiEvent,
+      "hosted_integration_event",
+    ),
+    route(
+      "/api/v1/events/{publicId}/entry-grants",
+      serveIntegrationApiEntryGrantCreate,
+      "hosted_integration_entry_grant_create",
+    ),
     route("/operator", serveOperatorConsole, "hosted_operator"),
     route(
       "/operator/reservations",
@@ -325,6 +359,11 @@ function createWhiteboardHttpHandler() {
     route("/b/{boardName}", serveEventBoardPage, "hosted_event_board_page"),
     route("/events/{publicId}", serveEventPage, "hosted_event_page"),
     route("/events/{publicId}/enter", serveEventEnter, "hosted_event_enter"),
+    route(
+      "/events/{publicId}/entry-grant",
+      serveEventEntryGrantRedeem,
+      "hosted_event_entry_grant_redeem",
+    ),
     route(
       "/events/{publicId}/anonymity",
       serveEventAnonymity,

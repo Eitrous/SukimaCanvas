@@ -141,11 +141,20 @@
         </p>
         {{/if}}
       </article>
+
+      <div
+        id="hosted-entry-grant"
+        data-event-public-id="{{hostedEventPublicId}}"
+        data-signed-in="{{#if hostedEventSignedIn}}1{{else}}0{{/if}}"
+        data-csrf="{{csrfToken}}"
+        hidden
+      ></div>
     </main>
 
     <footer class="hosted-footer">
       <span>{{hostedTranslations.hosted_service_name}}</span>
       <a href="source">{{hostedTranslations.hosted_source_link}}</a>
     </footer>
+    <script src="hosted-entry-grant.js" defer></script>
   </body>
 </html>

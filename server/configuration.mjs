@@ -201,6 +201,51 @@ export const HOSTED_ACCESS_CODE_ATTEMPTS_WINDOW_MS = parseIntegerEnv(
 );
 
 /**
+ * How long an Entry Grant stays redeemable after its organizer backend
+ * requested it. The integration contract is 10 minutes.
+ */
+export const HOSTED_ENTRY_GRANT_TTL_MS = parseIntegerEnv(
+  "WBO_HOSTED_ENTRY_GRANT_TTL_MS",
+  10 * 60 * 1000,
+);
+
+/** Maximum Entry Grant redemption attempts per account or IP within the window. */
+export const HOSTED_ENTRY_GRANT_ATTEMPTS_LIMIT = parseIntegerEnv(
+  "WBO_HOSTED_ENTRY_GRANT_ATTEMPTS_LIMIT",
+  10,
+);
+
+/** Window for hosted Entry Grant redemption attempt limits. */
+export const HOSTED_ENTRY_GRANT_ATTEMPTS_WINDOW_MS = parseIntegerEnv(
+  "WBO_HOSTED_ENTRY_GRANT_ATTEMPTS_WINDOW_MS",
+  15 * 60 * 1000,
+);
+
+/** Maximum Entry Grant creations per API credential within the window. */
+export const HOSTED_API_ENTRY_GRANT_LIMIT = parseIntegerEnv(
+  "WBO_HOSTED_API_ENTRY_GRANT_LIMIT",
+  60,
+);
+
+/** Window for the per-credential Entry Grant creation limit. */
+export const HOSTED_API_ENTRY_GRANT_WINDOW_MS = parseIntegerEnv(
+  "WBO_HOSTED_API_ENTRY_GRANT_WINDOW_MS",
+  60 * 1000,
+);
+
+/** Maximum API credential mint/rotation attempts per account or IP within the window. */
+export const HOSTED_CREDENTIAL_ATTEMPTS_LIMIT = parseIntegerEnv(
+  "WBO_HOSTED_CREDENTIAL_ATTEMPTS_LIMIT",
+  10,
+);
+
+/** Window for hosted API credential management attempt limits. */
+export const HOSTED_CREDENTIAL_ATTEMPTS_WINDOW_MS = parseIntegerEnv(
+  "WBO_HOSTED_CREDENTIAL_ATTEMPTS_WINDOW_MS",
+  15 * 60 * 1000,
+);
+
+/**
  * How long a Participant Seat stays reserved for its Account after the
  * Account's last live connection drops. Reconnecting inside the window
  * restores the seat without contending for capacity; after it expires the
