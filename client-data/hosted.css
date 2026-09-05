@@ -421,6 +421,22 @@ h1 {
   letter-spacing: 0.12em;
 }
 
+/* API credential secrets are long tokens; wrap instead of stretching the card. */
+.hosted-credential-secret-value {
+  display: block;
+  margin: 6px 0 0;
+  padding: 4px 6px;
+  border: 1px solid var(--hosted-border-strong);
+  border-radius: 2px;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.hosted-credential-id {
+  font-size: 11px;
+  word-break: break-all;
+}
+
 .hosted-session-list {
   margin: 0 0 16px;
   padding: 0;

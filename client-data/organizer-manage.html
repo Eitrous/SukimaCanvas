@@ -128,6 +128,56 @@
         </ul>
         {{/if}}
 
+        {{#if hostedOrganizerCredentialReveal}}
+        <p class="hosted-form-success" role="status">
+          {{hostedTranslations.hosted_org_credentials_reveal}}
+          <code class="hosted-credential-secret-value">{{hostedOrganizerCredentialReveal}}</code>
+        </p>
+        <p class="hosted-form-hint">{{hostedTranslations.hosted_org_credentials_reveal_hint}}</p>
+        {{/if}}
+
+        <h2 class="hosted-account-section-title">{{hostedTranslations.hosted_org_credentials_title}}</h2>
+        <p class="hosted-account-note">{{hostedTranslations.hosted_org_credentials_note}}</p>
+        <p class="hosted-form-hint">{{hostedTranslations.hosted_org_credentials_api_hint}}</p>
+        {{#if hostedOrganizerHasCredentials}}
+        <ul class="hosted-member-list">
+          {{#hostedOrganizerCredentials}}
+          <li class="hosted-member-item">
+            <div class="hosted-member-meta">
+              <span class="hosted-credential-id">{{credentialId}}</span>
+              <span class="hosted-member-role">
+                {{#if isActive}}{{../hostedTranslations.hosted_org_credentials_status_active}}{{/if}}
+                {{#if isRevoked}}{{../hostedTranslations.hosted_org_credentials_status_revoked}}{{/if}}
+              </span>
+            </div>
+            <div class="hosted-member-meta hosted-form-hint">
+              <span>{{../hostedTranslations.hosted_org_credentials_created_label}}: {{createdAt}}</span>
+              {{#if rotatedAt}}<span>{{../hostedTranslations.hosted_org_credentials_rotated_label}}: {{rotatedAt}}</span>{{/if}}
+              {{#if revokedAt}}<span>{{../hostedTranslations.hosted_org_credentials_revoked_label}}: {{revokedAt}}</span>{{/if}}
+            </div>
+            {{#if isActive}}
+            <div class="hosted-member-actions">
+              <form method="post" action="organizers/{{../hostedOrganizerId}}/credentials/{{credentialId}}/rotate">
+                <input type="hidden" name="_csrf" value="{{../csrfToken}}" />
+                <button type="submit" class="hosted-submit hosted-submit-small">{{../hostedTranslations.hosted_org_credentials_rotate}}</button>
+              </form>
+              <form method="post" action="organizers/{{../hostedOrganizerId}}/credentials/{{credentialId}}/revoke">
+                <input type="hidden" name="_csrf" value="{{../csrfToken}}" />
+                <button type="submit" class="hosted-submit hosted-submit-small hosted-submit-danger">{{../hostedTranslations.hosted_org_credentials_revoke}}</button>
+              </form>
+            </div>
+            {{/if}}
+          </li>
+          {{/hostedOrganizerCredentials}}
+        </ul>
+        {{else}}
+        <p class="hosted-form-hint">{{hostedTranslations.hosted_org_credentials_empty}}</p>
+        {{/if}}
+        <form method="post" action="organizers/{{hostedOrganizerId}}/credentials" class="hosted-reservation-action">
+          <input type="hidden" name="_csrf" value="{{csrfToken}}" />
+          <button type="submit" class="hosted-submit">{{hostedTranslations.hosted_org_credentials_create}}</button>
+        </form>
+
         <h2 class="hosted-account-section-title">{{hostedTranslations.hosted_operator_audit_title}}</h2>
         <ul class="hosted-operator-audit">
           {{#hostedOrganizerAudit}}

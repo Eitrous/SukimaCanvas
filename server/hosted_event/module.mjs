@@ -1,6 +1,6 @@
+import { registerBoardMutationLedgerFactory } from "../board/ledger_registry.mjs";
 import { localizedHref, Template } from "../http/templating.mjs";
 import observability from "../observability/index.mjs";
-import { registerBoardMutationLedgerFactory } from "../board/ledger_registry.mjs";
 import { createHostedCaptcha } from "./accounts/captcha.mjs";
 import { createOutboxMailDelivery } from "./accounts/mail.mjs";
 import { createRateLimiter } from "./accounts/rate_limits.mjs";
@@ -9,10 +9,12 @@ import {
   resolveSignedInAccountFromRequest,
 } from "./accounts/routes.mjs";
 import { createFileAccountStore } from "./accounts/store.mjs";
-import { createParticipantIdentifierResolver } from "./attribution.mjs";
 import { createEventAdmission } from "./admission/index.mjs";
 import { createFileBrandAssetStore } from "./assets/store.mjs";
+import { createParticipantIdentifierResolver } from "./attribution.mjs";
 import { createEventRoutes } from "./events/routes.mjs";
+import { createIntegrationRoutes } from "./integrations/routes.mjs";
+import { createFileIntegrationStore } from "./integrations/store.mjs";
 import { createFileBoardMutationLedger } from "./ledger/store.mjs";
 import { createFileEventMembershipStore } from "./memberships/store.mjs";
 import { createOrganizerRoutes } from "./organizers/routes.mjs";
@@ -166,6 +168,11 @@ function createHostedEventModule(config, paths) {
     dataDir: config.HOSTED_DATA_DIR,
     clock,
   });
+  const integrationStore = createFileIntegrationStore({
+    dataDir: config.HOSTED_DATA_DIR,
+    clock,
+    grantTtlMs: config.HOSTED_ENTRY_GRANT_TTL_MS,
+  });
   // Platform Operators are provisioned by deployment config rather than
   // self-service registration: an account whose verified email is listed is an
   // operator. Emails in the config are already normalized (trimmed, lowercased)
@@ -251,6 +258,7 @@ function createHostedEventModule(config, paths) {
     config,
     accountStore: store,
     organizerStore,
+    integrationStore,
     limiter,
     operatorEmails,
     templates: {
@@ -344,6 +352,16 @@ function createHostedEventModule(config, paths) {
         templateOptions,
       ),
     },
+  });
+
+  const integrationRoutes = createIntegrationRoutes({
+    config,
+    clock,
+    accountStore: store,
+    organizerStore,
+    membershipStore,
+    integrationStore,
+    limiter,
   });
 
   // Real-time admission for event Board Sessions: the single authority that
@@ -440,6 +458,10 @@ function createHostedEventModule(config, paths) {
     ...reservationRoutes,
     serveEventPage: eventRoutes.serveEventPage,
     serveEventEnter: eventRoutes.serveEventEnter,
+    serveEventEntryGrantRedeem: integrationRoutes.serveEventEntryGrantRedeem,
+    serveIntegrationApiEvent: integrationRoutes.serveIntegrationApiEvent,
+    serveIntegrationApiEntryGrantCreate:
+      integrationRoutes.serveIntegrationApiEntryGrantCreate,
     refreshEventLifecycle,
     ...eventAdmission,
     serveEventAnonymity: eventRoutes.serveEventAnonymity,

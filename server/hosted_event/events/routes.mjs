@@ -151,6 +151,7 @@ function createEventRoutes(dependencies) {
     not_open: "hosted_event_notice_not_open",
     membership: "hosted_event_notice_membership",
     banned: "hosted_event_notice_banned",
+    grant_invalid: "hosted_event_notice_grant_invalid",
   };
 
   /**

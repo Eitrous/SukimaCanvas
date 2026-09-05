@@ -1,15 +1,15 @@
-import observability from "../../observability/index.mjs";
 import { BoundaryError } from "../../http/boundary_errors.mjs";
-import { resolveRequestClientIpSafe } from "../../socket/policy.mjs";
 import { publicPath } from "../../http/request_url.mjs";
+import observability from "../../observability/index.mjs";
+import { resolveRequestClientIpSafe } from "../../socket/policy.mjs";
+import { isValidNormalizedEmail, normalizeEmail } from "../accounts/emails.mjs";
+import { resolveSignedInAccountFromRequest } from "../accounts/routes.mjs";
 import {
   createFormSecurity,
   readFormBody,
   seeOther,
   translate,
 } from "../http_forms.mjs";
-import { isValidNormalizedEmail, normalizeEmail } from "../accounts/emails.mjs";
-import { resolveSignedInAccountFromRequest } from "../accounts/routes.mjs";
 
 const { logger } = observability;
 
@@ -43,6 +43,9 @@ const ORG_AUDIT_ACTION_KEYS = {
   "organizer_invitation.revoked": "hosted_org_audit_invitation_revoked",
   "organizer_member.role_changed": "hosted_org_audit_role_changed",
   "organizer_member.removed": "hosted_org_audit_member_removed",
+  "organizer_credential.created": "hosted_org_audit_credential_created",
+  "organizer_credential.rotated": "hosted_org_audit_credential_rotated",
+  "organizer_credential.revoked": "hosted_org_audit_credential_revoked",
 };
 
 /** Member role -> translation key for display labels. */
@@ -65,6 +68,7 @@ const ROLE_LABEL_KEYS = {
  *   config: ServerConfig,
  *   accountStore: ReturnType<typeof import("../accounts/store.mjs").createFileAccountStore>,
  *   organizerStore: ReturnType<typeof import("./store.mjs").createFileOrganizerStore>,
+ *   integrationStore: ReturnType<typeof import("../integrations/store.mjs").createFileIntegrationStore>,
  *   limiter: ReturnType<typeof import("../accounts/rate_limits.mjs").createRateLimiter>,
  *   operatorEmails: Set<string>,
  *   templates: {
@@ -81,6 +85,7 @@ function createOrganizerRoutes(dependencies) {
     config,
     accountStore,
     organizerStore,
+    integrationStore,
     limiter,
     operatorEmails,
     templates,
@@ -743,7 +748,7 @@ function createOrganizerRoutes(dependencies) {
    * @param {number} statusCode
    * @param {string} organizerId
    * @param {{account: {accountId: string, email: string}, role: "owner" | "admin"}} membership
-   * @param {{errorKey?: string}} state
+   * @param {{errorKey?: string, credentialReveal?: string, credentialCreated?: boolean}} state
    * @returns {void}
    */
   function renderManage(ctx, statusCode, organizerId, membership, state) {
@@ -801,6 +806,25 @@ function createOrganizerRoutes(dependencies) {
           };
         })
       : [];
+    // API credential metadata is an Owner-only view. Only digests are stored,
+    // so the list can never expose a bearer value; the raw secret appears
+    // exactly once through `credentialReveal` right after create or rotate.
+    const credentials = isOwner
+      ? integrationStore
+          .listCredentialsForOrganizer(organizerId)
+          .map((credential) => ({
+            credentialId: credential.credentialId,
+            isActive: credential.status === "active",
+            isRevoked: credential.status === "revoked",
+            createdAt: formatTimestamp(language, credential.createdAtMs),
+            rotatedAt: credential.rotatedAtMs
+              ? formatTimestamp(language, credential.rotatedAtMs)
+              : undefined,
+            revokedAt: credential.revokedAtMs
+              ? formatTimestamp(language, credential.revokedAtMs)
+              : undefined,
+          }))
+      : [];
     template.serveWithStatus(ctx.request, ctx.response, statusCode, {
       hostedOrganizerId: organizerId,
       hostedOrganizerName: organizer.name,
@@ -809,6 +833,10 @@ function createOrganizerRoutes(dependencies) {
       hostedOrganizerMembers: members,
       hostedOrganizerInvites: invitations,
       hostedOrganizerHasInvites: invitations.length > 0,
+      hostedOrganizerCredentials: credentials,
+      hostedOrganizerHasCredentials: credentials.length > 0,
+      hostedOrganizerCredentialReveal: state.credentialReveal,
+      hostedOrganizerCredentialCreated: state.credentialCreated === true,
       hostedOrganizerAudit: audit,
       hostedOrganizerManageError: state.errorKey
         ? translate(template, ctx, state.errorKey)
@@ -1001,6 +1029,170 @@ function createOrganizerRoutes(dependencies) {
     seeOther(ctx, publicPath(config, `/organizers/${organizerId}`));
   }
 
+  // --- API credential administration (Owner-only) ---------------------------
+
+  /**
+   * Consumes the Owner's credential-management rate budget (create and rotate
+   * mint secrets; revoke is deliberately unlimited so a leaked credential can
+   * always be killed immediately).
+   *
+   * @param {HttpRouteContext} ctx
+   * @param {string} organizerId
+   * @param {{account: {accountId: string, email: string}, role: "owner"}} owner
+   * @returns {Promise<boolean>} false when the budget is exhausted (response rendered)
+   */
+  async function consumeCredentialBudget(ctx, organizerId, owner) {
+    const address = resolveRequestClientIpSafe(config, ctx.request);
+    const limit = config.HOSTED_CREDENTIAL_ATTEMPTS_LIMIT;
+    const windowMs = config.HOSTED_CREDENTIAL_ATTEMPTS_WINDOW_MS;
+    if (
+      !limiter.consume(
+        "organizer_credential",
+        `account:${owner.account.accountId}`,
+        limit,
+        windowMs,
+      ).allowed ||
+      !limiter.consume("organizer_credential", `ip:${address}`, limit, windowMs)
+        .allowed
+    ) {
+      renderManage(ctx, 429, organizerId, owner, {
+        errorKey: "hosted_error_rate_limited",
+      });
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * @param {HttpRouteContext} ctx
+   * @returns {Promise<void>}
+   */
+  async function serveOrganizerCredentialCreate(ctx) {
+    if (ctx.request.method !== "POST") {
+      throw new BoundaryError(405, "method_not_allowed");
+    }
+    const organizerId = ctx.params.organizerId || "";
+    const owner = requireOwner(ctx, organizerId);
+    if (!owner) return;
+    const form = await readFormBody(ctx.request);
+    if (!requestHasValidCsrf(ctx.request, form)) {
+      renderManage(ctx, 403, organizerId, owner, {
+        errorKey: "hosted_error_csrf",
+      });
+      return;
+    }
+    if (!(await consumeCredentialBudget(ctx, organizerId, owner))) return;
+    const result = await integrationStore.createCredential({
+      organizerId,
+      createdByAccountId: owner.account.accountId,
+    });
+    organizerStore.appendAudit({
+      actorAccountId: owner.account.accountId,
+      actorKind: "account",
+      action: "organizer_credential.created",
+      subjectType: "organizer_credential",
+      subjectId: result.credential.credentialId,
+      organizerId,
+    });
+    logger.info("hosted.organizer_credential_created", {
+      organizer_id: organizerId,
+      credential_id: result.credential.credentialId,
+    });
+    renderManage(ctx, 200, organizerId, owner, {
+      credentialReveal: result.token,
+      credentialCreated: true,
+    });
+  }
+
+  /**
+   * @param {HttpRouteContext} ctx
+   * @returns {Promise<void>}
+   */
+  async function serveOrganizerCredentialRotate(ctx) {
+    if (ctx.request.method !== "POST") {
+      throw new BoundaryError(405, "method_not_allowed");
+    }
+    const organizerId = ctx.params.organizerId || "";
+    const owner = requireOwner(ctx, organizerId);
+    if (!owner) return;
+    const form = await readFormBody(ctx.request);
+    if (!requestHasValidCsrf(ctx.request, form)) {
+      renderManage(ctx, 403, organizerId, owner, {
+        errorKey: "hosted_error_csrf",
+      });
+      return;
+    }
+    if (!(await consumeCredentialBudget(ctx, organizerId, owner))) return;
+    const result = await integrationStore.rotateCredential({
+      organizerId,
+      credentialId: ctx.params.credentialId || "",
+    });
+    if (!result.ok) {
+      if (result.reason === "not_found") {
+        throw new BoundaryError(404, "credential_not_found");
+      }
+      renderManage(ctx, 409, organizerId, owner, {
+        errorKey: "hosted_org_credentials_error_revoked",
+      });
+      return;
+    }
+    organizerStore.appendAudit({
+      actorAccountId: owner.account.accountId,
+      actorKind: "account",
+      action: "organizer_credential.rotated",
+      subjectType: "organizer_credential",
+      subjectId: ctx.params.credentialId || "",
+      organizerId,
+    });
+    logger.info("hosted.organizer_credential_rotated", {
+      organizer_id: organizerId,
+      credential_id: ctx.params.credentialId || "",
+    });
+    renderManage(ctx, 200, organizerId, owner, {
+      credentialReveal: result.token,
+    });
+  }
+
+  /**
+   * @param {HttpRouteContext} ctx
+   * @returns {Promise<void>}
+   */
+  async function serveOrganizerCredentialRevoke(ctx) {
+    if (ctx.request.method !== "POST") {
+      throw new BoundaryError(405, "method_not_allowed");
+    }
+    const organizerId = ctx.params.organizerId || "";
+    const owner = requireOwner(ctx, organizerId);
+    if (!owner) return;
+    const form = await readFormBody(ctx.request);
+    if (!requestHasValidCsrf(ctx.request, form)) {
+      renderManage(ctx, 403, organizerId, owner, {
+        errorKey: "hosted_error_csrf",
+      });
+      return;
+    }
+    const result = await integrationStore.revokeCredential({
+      organizerId,
+      credentialId: ctx.params.credentialId || "",
+    });
+    if (!result.ok) {
+      throw new BoundaryError(404, "credential_not_found");
+    }
+    organizerStore.appendAudit({
+      actorAccountId: owner.account.accountId,
+      actorKind: "account",
+      action: "organizer_credential.revoked",
+      subjectType: "organizer_credential",
+      subjectId: ctx.params.credentialId || "",
+      organizerId,
+    });
+    logger.info("hosted.organizer_credential_revoked", {
+      organizer_id: organizerId,
+      credential_id: ctx.params.credentialId || "",
+    });
+    seeOther(ctx, publicPath(config, `/organizers/${organizerId}`));
+  }
+
   return {
     serveOrganizerApply,
     serveOperatorConsole,
@@ -1015,6 +1207,9 @@ function createOrganizerRoutes(dependencies) {
     serveOrganizerInvitationRevoke,
     serveOrganizerMemberRole,
     serveOrganizerMemberRemove,
+    serveOrganizerCredentialCreate,
+    serveOrganizerCredentialRotate,
+    serveOrganizerCredentialRevoke,
   };
 }
 

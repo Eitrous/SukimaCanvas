@@ -2358,6 +2358,9 @@ function createFileOrganizerStore(options) {
     setEventCover,
     rotateEventAccessCode,
     setEventEntryLock,
+    // Public audit append for sibling domain stores (e.g. API credentials)
+    // whose administrative actions belong in the organizer's activity log.
+    appendAudit: recordAudit,
     flush,
   };
 }
