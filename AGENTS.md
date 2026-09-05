@@ -321,6 +321,11 @@ hydrate ledger entries newer than the snapshot sequence
 (`board.ledger_hydrated`), the ledger stays append-only for the Board
 Session's lifetime (retention is later work building on it), and ledger
 corruption or a replay gap fails the load instead of silently diverging.
+An unreadable stored SVG is quarantined with `svg.snapshot_unreadable_quarantined`
+and recovery continues from the backup or the ledger rebuild; a torn
+final ledger line (a crash mid-append) is dropped on read and the append
+boundary is repaired before the next append so the torn bytes are never
+buried mid-file.
 [svg_board_store.mjs](./server/persistence/svg_board_store.mjs)
 reads served baselines, loads canonical board state, writes fresh SVGs, and
 rewrites existing SVGs. It relies on

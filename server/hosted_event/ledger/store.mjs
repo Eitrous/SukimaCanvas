@@ -131,6 +131,63 @@ function createFileBoardMutationLedger(dependencies) {
     return appendHandle;
   }
 
+  /** @type {Promise<void> | null} */
+  let appendBoundary = null;
+
+  /**
+   * Runs once per adapter instance before the first append. After a crash
+   * mid-append the file can end with bytes that never completed their fsync:
+   *
+   * - a partial JSON line is unconfirmed and unrecoverable — reads drop it,
+   *   so it is truncated away. Appending after torn bytes would bury them
+   *   mid-file and fail every later read as corruption;
+   * - a complete final entry whose trailing newline was lost is sealed with
+   *   a newline instead, because reads accept it and truncating it would
+   *   contradict the recovered history.
+   *
+   * In-process appends are serialized here and always newline-terminated, so
+   * the boundary stays clean afterwards. A failed repair rejects this cached
+   * promise and every later append on the instance with it — fail-closed, so
+   * the mutated board instance is dropped and reloaded from snapshot plus
+   * ledger.
+   *
+   * @returns {Promise<void>}
+   */
+  function ensureAppendBoundary() {
+    appendBoundary ??= repairAppendBoundary();
+    return appendBoundary;
+  }
+
+  /**
+   * @returns {Promise<void>}
+   */
+  async function repairAppendBoundary() {
+    let content;
+    try {
+      content = await readFile(ledgerPath, "utf8");
+    } catch (error) {
+      if (/** @type {any} */ (error)?.code === "ENOENT") return;
+      throw error;
+    }
+    if (content === "" || content.endsWith("\n")) return;
+    const lastNewline = content.lastIndexOf("\n");
+    const trailingLine = content.slice(lastNewline + 1);
+    if (parseLedgerLine(trailingLine)) {
+      const handle = await openAppendHandle();
+      await handle.write("\n", null, "utf8");
+      return;
+    }
+    const validByteLength =
+      lastNewline === -1
+        ? 0
+        : Buffer.byteLength(content.slice(0, lastNewline + 1), "utf8");
+    await fs.promises.truncate(ledgerPath, validByteLength);
+    logger.warn("hosted.ledger_torn_tail_truncated", {
+      board: boardName,
+      truncated_bytes: Buffer.byteLength(content, "utf8") - validByteLength,
+    });
+  }
+
   /**
    * Durably appends one or more entries with a single fsync, so an accepted
    * mutation and its follow-up effects are confirmed together.
@@ -146,6 +203,7 @@ function createFileBoardMutationLedger(dependencies) {
       }
     }
     await enqueue(async () => {
+      await ensureAppendBoundary();
       const handle = await openAppendHandle();
       const payload = `${entries
         .map((entry) => JSON.stringify(entry))
@@ -157,9 +215,10 @@ function createFileBoardMutationLedger(dependencies) {
 
   /**
    * Reads all durable entries after a sequence, oldest first. A torn final
-   * line (a crash mid-append) is dropped: it was never confirmed. Corruption
-   * anywhere else is an error — silently skipping ledger history would fake
-   * recovery.
+   * line (a crash mid-append) is dropped: it was never confirmed, and the
+   * append boundary repair keeps later appends from burying the torn bytes
+   * mid-file. Corruption anywhere else is an error — silently skipping
+   * ledger history would fake recovery.
    *
    * @param {number} fromExclusiveSeq
    * @returns {Promise<LedgerEntry[]>}

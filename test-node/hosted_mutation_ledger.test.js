@@ -98,6 +98,69 @@ test("a torn final line from a crashed append is dropped on read", async () => {
   );
 });
 
+test("a post-crash append stays on a clean boundary after a torn tail", async () => {
+  const dataDir = await createDataDir();
+  const ledgerPath = path.join(dataDir, "mutation-ledger", "event-torn.jsonl");
+  await fs.mkdir(path.dirname(ledgerPath), { recursive: true });
+  const torn = JSON.stringify(ledgerEntry("event-torn", 2)).slice(0, 40);
+  await fs.writeFile(
+    ledgerPath,
+    `${JSON.stringify(ledgerEntry("event-torn", 1))}\n${torn}`,
+  );
+
+  const ledger = createFileBoardMutationLedger({
+    boardName: "event-torn",
+    dataDir,
+  });
+  // The read drops the unconfirmed torn tail; the next append must repair
+  // the boundary instead of writing after the torn bytes.
+  assert.deepEqual(
+    (await ledger.readEntriesAfter(0)).map((entry) => entry.seq),
+    [1],
+  );
+  await ledger.appendEntries([ledgerEntry("event-torn", 2)]);
+  assert.deepEqual(
+    (await ledger.readEntriesAfter(0)).map((entry) => entry.seq),
+    [1, 2],
+  );
+
+  // A fresh adapter (simulating another reload) must not see corruption.
+  const reloaded = createFileBoardMutationLedger({
+    boardName: "event-torn",
+    dataDir,
+  });
+  assert.deepEqual(
+    (await reloaded.readEntriesAfter(0)).map((entry) => entry.seq),
+    [1, 2],
+  );
+});
+
+test("a complete but unterminated final entry is sealed, not truncated", async () => {
+  const dataDir = await createDataDir();
+  const ledgerPath = path.join(dataDir, "mutation-ledger", "event-seal.jsonl");
+  await fs.mkdir(path.dirname(ledgerPath), { recursive: true });
+  // The write reached the disk but the fsync (and the trailing newline) did
+  // not complete before the crash.
+  await fs.writeFile(
+    ledgerPath,
+    `${JSON.stringify(ledgerEntry("event-seal", 1))}\n${JSON.stringify(ledgerEntry("event-seal", 2))}`,
+  );
+
+  const ledger = createFileBoardMutationLedger({
+    boardName: "event-seal",
+    dataDir,
+  });
+  assert.deepEqual(
+    (await ledger.readEntriesAfter(0)).map((entry) => entry.seq),
+    [1, 2],
+  );
+  await ledger.appendEntries([ledgerEntry("event-seal", 3)]);
+  assert.deepEqual(
+    (await ledger.readEntriesAfter(0)).map((entry) => entry.seq),
+    [1, 2, 3],
+  );
+});
+
 test("corruption before the final line fails the read loudly", async () => {
   const dataDir = await createDataDir();
   const ledgerPath = path.join(
