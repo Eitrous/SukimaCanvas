@@ -120,6 +120,10 @@
         <form method="post" action="organizers/{{hostedOrganizerId}}/events/{{hostedEventId}}/entry-lock" class="hosted-reservation-action">
           <input type="hidden" name="_csrf" value="{{csrfToken}}" />
           <input type="hidden" name="locked" value="{{#if hostedEventEntryLocked}}0{{else}}1{{/if}}" />
+          <div class="hosted-form-field">
+            <label for="hosted-event-entry-lock-reason">{{hostedTranslations.hosted_event_lock_reason_label}}</label>
+            <input type="text" id="hosted-event-entry-lock-reason" name="reason" maxlength="500" />
+          </div>
           <button type="submit" class="hosted-submit {{#if hostedEventEntryLocked}}hosted-submit-danger{{/if}}">
             {{#if hostedEventEntryLocked}}
             {{hostedTranslations.hosted_event_entry_unlock}}
@@ -129,6 +133,51 @@
           </button>
         </form>
         <p class="hosted-form-hint">{{hostedTranslations.hosted_event_entry_lock_hint}}</p>
+
+        <h2 class="hosted-account-section-title">{{hostedTranslations.hosted_event_moderators_title}}</h2>
+        <p class="hosted-form-hint">{{hostedTranslations.hosted_event_moderators_hint}}</p>
+        {{#if hostedEventHasModerators}}
+        <ul class="hosted-moderator-list">
+          {{#hostedEventModerators}}
+          <li class="hosted-moderator-item">
+            <span class="hosted-moderator-email">{{email}}</span>
+            <span class="hosted-moderator-granted">{{hostedTranslations.hosted_event_moderator_granted_at}} {{grantedAt}}</span>
+            <form method="post" action="organizers/{{hostedOrganizerId}}/events/{{hostedEventId}}/moderators/{{accountId}}/revoke" class="hosted-reservation-action">
+              <input type="hidden" name="_csrf" value="{{csrfToken}}" />
+              <button type="submit" class="hosted-submit hosted-submit-danger">{{hostedTranslations.hosted_event_moderator_revoke}}</button>
+            </form>
+          </li>
+          {{/hostedEventModerators}}
+        </ul>
+        {{else}}
+        <p class="hosted-account-note">{{hostedTranslations.hosted_event_moderators_empty}}</p>
+        {{/if}}
+        <form method="post" action="organizers/{{hostedOrganizerId}}/events/{{hostedEventId}}/moderators">
+          <input type="hidden" name="_csrf" value="{{csrfToken}}" />
+          <div class="hosted-form-field">
+            <label for="hosted-event-moderator-email">{{hostedTranslations.hosted_event_moderator_email_label}}</label>
+            <input type="email" id="hosted-event-moderator-email" name="email" required />
+            <p class="hosted-form-hint">{{hostedTranslations.hosted_event_moderator_email_hint}}</p>
+          </div>
+          <button type="submit" class="hosted-submit">{{hostedTranslations.hosted_event_moderator_grant}}</button>
+        </form>
+
+        <h2 class="hosted-account-section-title">{{hostedTranslations.hosted_event_moderation_log_title}}</h2>
+        {{#if hostedEventHasModerationRecords}}
+        <ul class="hosted-moderation-log">
+          {{#hostedEventModerationRecords}}
+          <li class="hosted-moderation-record">
+            <span class="hosted-moderation-record-time">{{createdAt}}</span>
+            <span class="hosted-moderation-record-action">{{actionLabel}}</span>
+            <span class="hosted-moderation-record-operator">{{operatorEmail}}</span>
+            {{#if targetName}}<span class="hosted-moderation-record-target">{{targetName}}<code>({{targetParticipantId}})</code></span>{{/if}}
+            {{#if reason}}<span class="hosted-moderation-record-reason">{{reason}}</span>{{/if}}
+          </li>
+          {{/hostedEventModerationRecords}}
+        </ul>
+        {{else}}
+        <p class="hosted-account-note">{{hostedTranslations.hosted_event_moderation_log_empty}}</p>
+        {{/if}}
 
         <h2 class="hosted-account-section-title">{{hostedTranslations.hosted_event_cover_label}}</h2>
         {{#if hostedEventHasCover}}

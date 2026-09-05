@@ -1,6 +1,6 @@
+import { registerBoardMutationLedgerFactory } from "../board/ledger_registry.mjs";
 import { localizedHref, Template } from "../http/templating.mjs";
 import observability from "../observability/index.mjs";
-import { registerBoardMutationLedgerFactory } from "../board/ledger_registry.mjs";
 import { createHostedCaptcha } from "./accounts/captcha.mjs";
 import { createOutboxMailDelivery } from "./accounts/mail.mjs";
 import { createRateLimiter } from "./accounts/rate_limits.mjs";
@@ -9,12 +9,14 @@ import {
   resolveSignedInAccountFromRequest,
 } from "./accounts/routes.mjs";
 import { createFileAccountStore } from "./accounts/store.mjs";
-import { createParticipantIdentifierResolver } from "./attribution.mjs";
 import { createEventAdmission } from "./admission/index.mjs";
 import { createFileBrandAssetStore } from "./assets/store.mjs";
+import { createParticipantIdentifierResolver } from "./attribution.mjs";
 import { createEventRoutes } from "./events/routes.mjs";
 import { createFileBoardMutationLedger } from "./ledger/store.mjs";
 import { createFileEventMembershipStore } from "./memberships/store.mjs";
+import { createEventModeration } from "./moderation/index.mjs";
+import { createFileModerationStore } from "./moderation/store.mjs";
 import { createOrganizerRoutes } from "./organizers/routes.mjs";
 import { createFileOrganizerStore } from "./organizers/store.mjs";
 import { createReservationRoutes } from "./reservations/routes.mjs";
@@ -163,6 +165,10 @@ function createHostedEventModule(config, paths) {
     clock,
   });
   const membershipStore = createFileEventMembershipStore({
+    dataDir: config.HOSTED_DATA_DIR,
+    clock,
+  });
+  const moderationStore = createFileModerationStore({
     dataDir: config.HOSTED_DATA_DIR,
     clock,
   });
@@ -323,29 +329,6 @@ function createHostedEventModule(config, paths) {
     },
   });
 
-  const eventRoutes = createEventRoutes({
-    config,
-    clock,
-    accountStore: store,
-    organizerStore,
-    membershipStore,
-    assetStore,
-    limiter,
-    templates: {
-      home: homeTemplate,
-      event: new HostedPageTemplate(
-        paths.eventTemplatePath,
-        config,
-        templateOptions,
-      ),
-      organizerEvent: new HostedPageTemplate(
-        paths.organizerEventTemplatePath,
-        config,
-        templateOptions,
-      ),
-    },
-  });
-
   // Real-time admission for event Board Sessions: the single authority that
   // decides who may open the board, in which role, and with which seat. Both
   // the socket layer and the hosted board page route come through it.
@@ -369,6 +352,40 @@ function createHostedEventModule(config, paths) {
     organizerStore,
     membershipStore,
     participantIdentifierFor,
+  });
+  // Event-scoped governance: the moderation log plus the ban/unban and
+  // report coordination shared by the socket handlers and the console
+  // routes. Real-time consequences (evictions, access refreshes) are the
+  // socket layer's job, applied through the moderation socket effects.
+  const eventModeration = createEventModeration({
+    organizerStore,
+    membershipStore,
+    moderationStore,
+    participantIdentifierFor,
+  });
+
+  const eventRoutes = createEventRoutes({
+    config,
+    clock,
+    accountStore: store,
+    organizerStore,
+    membershipStore,
+    moderation: eventModeration,
+    assetStore,
+    limiter,
+    templates: {
+      home: homeTemplate,
+      event: new HostedPageTemplate(
+        paths.eventTemplatePath,
+        config,
+        templateOptions,
+      ),
+      organizerEvent: new HostedPageTemplate(
+        paths.organizerEventTemplatePath,
+        config,
+        templateOptions,
+      ),
+    },
   });
   if (config.HOSTED_MODE === true) {
     // Durable mutation ledger: every accepted persistent write on a hosted
@@ -442,11 +459,15 @@ function createHostedEventModule(config, paths) {
     serveEventEnter: eventRoutes.serveEventEnter,
     refreshEventLifecycle,
     ...eventAdmission,
+    ...eventModeration,
     serveEventAnonymity: eventRoutes.serveEventAnonymity,
     serveBrandAsset: eventRoutes.serveBrandAsset,
     serveOrganizerEvent: eventRoutes.serveOrganizerEvent,
     serveOrganizerEventAccessCode: eventRoutes.serveOrganizerEventAccessCode,
     serveOrganizerEventEntryLock: eventRoutes.serveOrganizerEventEntryLock,
+    serveOrganizerEventModerators: eventRoutes.serveOrganizerEventModerators,
+    serveOrganizerEventModeratorRevoke:
+      eventRoutes.serveOrganizerEventModeratorRevoke,
     serveOrganizerEventCover: eventRoutes.serveOrganizerEventCover,
   };
 }

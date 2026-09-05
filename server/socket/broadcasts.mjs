@@ -4,6 +4,7 @@ import {
   getMutationType,
   getToolId,
 } from "../../client-data/js/message_tool_metadata.js";
+import { MutationType } from "../../client-data/js/mutation_type.js";
 import { SocketEvents } from "../../client-data/js/socket_events.js";
 import { Cursor } from "../../client-data/tools/index.js";
 import {
@@ -431,6 +432,7 @@ async function persistBoardBroadcast(
   if (handleResult.value !== data) {
     Object.assign(data, handleResult.value);
   }
+  recordHostedClearAudit(socket, handleResult.value);
   finishSuccessfulPersistentBoardWrite(
     socket,
     board,
@@ -442,6 +444,36 @@ async function persistBoardBroadcast(
     handleResult.followup,
     runtime,
   );
+}
+
+/**
+ * Mirrors an accepted hosted Clear into the event's moderation trail with
+ * the operator and the reason the tool collected. The mutation ledger
+ * remains the technical audit; this makes the Clear visible beside the
+ * other governance actions. Best-effort: never blocks or fails the write.
+ *
+ * @param {AppSocket} socket
+ * @param {NormalizedMessageData} mutation
+ * @returns {void}
+ */
+function recordHostedClearAudit(socket, mutation) {
+  if (getMutationType(mutation) !== MutationType.CLEAR) return;
+  const hosted = socket.hostedEventModule;
+  const admission = socket.hostedEventAdmission;
+  if (hosted?.enabled !== true || !admission) return;
+  if (typeof hosted.recordClear !== "function") return;
+  hosted
+    .recordClear({
+      eventId: admission.eventId,
+      operatorAccountId: admission.accountId,
+      reason:
+        typeof (/** @type {any} */ (mutation).reason) === "string"
+          ? /** @type {any} */ (mutation).reason
+          : "",
+    })
+    .catch((error) => {
+      logger.error("hosted.clear_audit_failed", { error });
+    });
 }
 
 /**

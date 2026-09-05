@@ -1,6 +1,7 @@
 import { BoundaryError } from "../http/boundary_errors.mjs";
 import { serveError } from "../http/observation.mjs";
 import { publicPath } from "../http/request_url.mjs";
+import { serveBoardSvg } from "./board_assets.mjs";
 import { serveBoardPage } from "./board_page.mjs";
 
 /** @import { HttpRouteContext } from "../../types/server-runtime.d.ts" */
@@ -26,6 +27,38 @@ import { serveBoardPage } from "./board_page.mjs";
  * @returns {Promise<void>}
  */
 async function serveEventBoardPage(ctx) {
+  const verdict = await admitEventBoardRequest(ctx);
+  if (!verdict) return;
+  await serveBoardPage(ctx);
+}
+
+/**
+ * The hosted board's SVG baseline: the client's reconnect baseline refresh
+ * fetches the page path with an `.svg` suffix, so hosted boards must serve
+ * it under the same admission gate — a 404 here would strand every kicked
+ * or resynchronizing client on a reconnect loop. Refusals answer with a
+ * machine-readable 403 instead of the page redirect so the client can route
+ * itself back to the event page.
+ *
+ * @param {HttpRouteContext} ctx
+ * @returns {Promise<void>}
+ */
+async function serveEventBoardSvg(ctx) {
+  const verdict = await admitEventBoardRequest(ctx, { svgBaseline: true });
+  if (!verdict) return;
+  await serveBoardSvg(ctx);
+}
+
+/**
+ * Shared admission gate for the hosted board page and its SVG baseline:
+ * lifecycle advance, admission verdict, role pinning, and the legacy-internal
+ * URL rewrite. Returns null when the response was already sent.
+ *
+ * @param {HttpRouteContext} ctx
+ * @param {{svgBaseline?: boolean}} [options]
+ * @returns {Promise<boolean>}
+ */
+async function admitEventBoardRequest(ctx, options = {}) {
   const hosted = ctx.runtime.hostedEventModule;
   if (!hosted.enabled) {
     serveError(
@@ -34,7 +67,7 @@ async function serveEventBoardPage(ctx) {
       ctx.runtime.errorPage,
       ctx.observed,
     )();
-    return;
+    return false;
   }
   if (ctx.request.method !== "GET") {
     throw new BoundaryError(405, "method_not_allowed");
@@ -57,17 +90,30 @@ async function serveEventBoardPage(ctx) {
           Location: publicPath(ctx.runtime.config, "/login"),
         });
         ctx.response.end();
-        return;
+        return false;
       case "event_not_found":
         throw new BoundaryError(404, "event_not_found");
       default:
+        if (options.svgBaseline === true) {
+          // A fetch() cannot observe the page redirect; the client routes
+          // itself back to the event page from this reason instead.
+          ctx.response.writeHead(403, {
+            "X-WBO-Admission-Reason": verdict.reason,
+          });
+          ctx.response.end();
+          return false;
+        }
         // Capacity, membership, ban, and lifecycle refusals route back to the
         // event page with one coarse notice each.
         redirectToEventNotice(ctx, verdict);
-        return;
+        return false;
     }
   }
   ctx.hostedBoardRole = verdict.role;
+  ctx.hostedEventPath = publicPath(
+    ctx.runtime.config,
+    `/events/${verdict.publicId}`,
+  );
   ctx.params = { board: verdict.boardName };
   // The board renderer derives the board identity from the request URL.
   // Present the event's board under its legacy-internal shape so the shell,
@@ -78,7 +124,7 @@ async function serveEventBoardPage(ctx) {
   boardUrl.pathname = boardPath;
   ctx.url = boardUrl;
   ctx.request.url = `${boardPath}${boardUrl.search}`;
-  await serveBoardPage(ctx);
+  return true;
 }
 
 /**
@@ -112,4 +158,4 @@ function redirectToEventNotice(ctx, verdict) {
   ctx.response.end();
 }
 
-export { serveEventBoardPage };
+export { serveEventBoardPage, serveEventBoardSvg };

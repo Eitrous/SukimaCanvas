@@ -8,6 +8,18 @@ import { createSeatRegistry } from "./seats.mjs";
 const { logger } = observability;
 
 /**
+ * The two governance roles that share the Preparation Window entry rules and
+ * never contend for Participant Seats. Only the Owner/Admin role carries the
+ * destructive Clear.
+ *
+ * @param {"moderator" | "event_moderator" | "editor" | "reader" | undefined} role
+ * @returns {boolean}
+ */
+function isGovernanceRole(role) {
+  return role === "moderator" || role === "event_moderator";
+}
+
+/**
  * Hosted Event admission for real-time board access.
  *
  * This module is the single authority that decides who may open an event's
@@ -22,6 +34,9 @@ const { logger } = observability;
  * - "moderator": Organizer Owner/Admin — may enter during the Preparation
  *   Window (scheduled) and while open; may clear the board; never contends
  *   for Participant Seats.
+ * - "event_moderator": a per-event Event Moderator grant — the same entry
+ *   window and seat exemption as Owner/Admin, with in-event governance
+ *   (reports, warnings, kicks, event bans) but never the destructive Clear.
  * - "editor": a member holding the account's single writable connection.
  * - "reader": a member connected without the writable slot (extra tab or
  *   device) — explicitly read-only.
@@ -69,6 +84,24 @@ function createEventAdmission(dependencies) {
 
   /** Event board names are `event-` prefixed by construction. */
   const HOSTED_BOARD_NAME_PREFIX = "event-";
+
+  /**
+   * The shared governance-entry decision: the Board Session must be inside
+   * the governed window (Preparation Window while scheduled, or open).
+   *
+   * @param {import("../organizers/store.mjs").StoredBoardSession} session
+   * @returns {{ok: true} | {ok: false, reason: string}}
+   */
+  function governanceWindowVerdict(session) {
+    if (session.status === "scheduled") {
+      if (clock() < session.startsAtMs - preparationWindowMs) {
+        return { ok: false, reason: "event_not_open" };
+      }
+      return { ok: true };
+    }
+    if (session.status === "open") return { ok: true };
+    return { ok: false, reason: "event_not_open" };
+  }
 
   /**
    * Resolves the signed-in hosted account from a raw cookie header. Uses the
@@ -123,7 +156,7 @@ function createEventAdmission(dependencies) {
    *   boardName: string,
    *   cookieHeader: string | undefined,
    * }} input
-   * @returns {{ok: true, role: "moderator" | "editor" | "reader", accountId: string, eventId: string, publicId: string, boardName: string, participantId: string, boardSessionId: string, seats: number} | {ok: false, reason: string}}
+   * @returns {{ok: true, role: "moderator" | "event_moderator" | "editor" | "reader", accountId: string, eventId: string, publicId: string, boardName: string, participantId: string, boardSessionId: string, seats: number} | {ok: false, reason: string}}
    */
   function admitEventBoard(input) {
     const boardName = String(input.boardName || "");
@@ -151,16 +184,32 @@ function createEventAdmission(dependencies) {
       // the planned start (the same 15-minute buffer the capacity window
       // uses) and stay admitted while open. Outside that window — a far-out
       // schedule or a closing/closed session — they are out like everyone.
-      const preparationStartMs = session.startsAtMs - preparationWindowMs;
-      if (session.status === "scheduled" && clock() < preparationStartMs) {
-        return { ok: false, reason: "event_not_open" };
-      }
-      if (session.status !== "scheduled" && session.status !== "open") {
-        return { ok: false, reason: "event_not_open" };
-      }
+      const windowVerdict = governanceWindowVerdict(session);
+      if (windowVerdict.ok === false) return windowVerdict;
       return {
         ok: true,
         role: "moderator",
+        accountId: account.accountId,
+        eventId: event.eventId,
+        publicId: event.publicId,
+        boardName: event.boardName,
+        participantId: participantIdentifierFor(
+          event.eventId,
+          account.accountId,
+        ),
+        boardSessionId: session.boardSessionId,
+        seats: session.seats,
+      };
+    }
+    if (organizerStore.isEventModerator(event.eventId, account.accountId)) {
+      // Event Moderators share the Owner/Admin entry window and never
+      // contend for Participant Seats; their capabilities stay scoped to
+      // in-event governance on the board.
+      const windowVerdict = governanceWindowVerdict(session);
+      if (windowVerdict.ok === false) return windowVerdict;
+      return {
+        ok: true,
+        role: "event_moderator",
         accountId: account.accountId,
         eventId: event.eventId,
         publicId: event.publicId,
@@ -221,7 +270,7 @@ function createEventAdmission(dependencies) {
    * the handshake; the stores are in-memory so this stays cheap enough for
    * per-message checks (never per-coordinate).
    *
-   * @param {{eventId: string, accountId: string, role: "moderator" | "editor" | "reader", boardName: string, socketId?: string}} admission
+   * @param {{eventId: string, accountId: string, role: "moderator" | "event_moderator" | "editor" | "reader", boardName: string, socketId?: string}} admission
    * @returns {{ok: true} | {ok: false, reason: string}}
    */
   function revalidateSocketWrite(admission) {
@@ -234,16 +283,9 @@ function createEventAdmission(dependencies) {
     }
     const session = organizerStore.getBoardSessionForEvent(admission.eventId);
     if (!session) return { ok: false, reason: "event_not_open" };
-    if (admission.role === "moderator") {
-      if (
-        session.status === "scheduled" &&
-        clock() < session.startsAtMs - preparationWindowMs
-      ) {
-        return { ok: false, reason: "event_not_open" };
-      }
-      if (session.status !== "scheduled" && session.status !== "open") {
-        return { ok: false, reason: "event_not_open" };
-      }
+    if (isGovernanceRole(admission.role)) {
+      const windowVerdict = governanceWindowVerdict(session);
+      if (windowVerdict.ok === false) return windowVerdict;
       return { ok: true };
     }
     if (session.status !== "open") {
@@ -286,7 +328,7 @@ function createEventAdmission(dependencies) {
      * itself resolved, so the route can route back to the event page.
      *
      * @param {{boardName: string, cookieHeader: string | undefined}} input
-     * @returns {{ok: true, role: "moderator" | "editor" | "reader", accountId: string, eventId: string, publicId: string, boardName: string} | {ok: false, reason: string, publicId?: string}}
+     * @returns {{ok: true, role: "moderator" | "event_moderator" | "editor" | "reader", accountId: string, eventId: string, publicId: string, boardName: string} | {ok: false, reason: string, publicId?: string}}
      */
     admitEventBoardPage(input) {
       const boardName = String(input.boardName || "");
@@ -306,13 +348,14 @@ function createEventAdmission(dependencies) {
      * single writable slot; the caller derives the socket's final role from
      * it and must drop refused connections.
      *
-     * @param {{eventId: string, accountId: string, role: "moderator" | "editor" | "reader", seats?: number}} admission
+     * @param {{eventId: string, accountId: string, role: "moderator" | "event_moderator" | "editor" | "reader", seats?: number}} admission
      * @param {string} socketId
      * @returns {{admitted: boolean, writable: boolean}}
      */
     noteEventSocketConnected(admission, socketId) {
-      if (admission.role === "moderator") {
-        // Owner/Admin presence never contends for Participant Seats.
+      if (isGovernanceRole(admission.role)) {
+        // Owner/Admin and Event Moderator presence never contends for
+        // Participant Seats.
         return { admitted: true, writable: true };
       }
       const result = seats.connect({
@@ -360,4 +403,4 @@ function createEventAdmission(dependencies) {
   };
 }
 
-export { createEventAdmission };
+export { createEventAdmission, isGovernanceRole };

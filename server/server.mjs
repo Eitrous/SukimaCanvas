@@ -12,7 +12,10 @@ import {
   serveBoardSvg,
 } from "./routes/board_assets.mjs";
 import { redirectBoardQuery, serveBoardPage } from "./routes/board_page.mjs";
-import { serveEventBoardPage } from "./routes/hosted_board_page.mjs";
+import {
+  serveEventBoardPage,
+  serveEventBoardSvg,
+} from "./routes/hosted_board_page.mjs";
 import {
   serveAccount,
   serveAccountPassword,
@@ -44,6 +47,8 @@ import {
   serveOrganizerEventAccessCode,
   serveOrganizerEventCover,
   serveOrganizerEventEntryLock,
+  serveOrganizerEventModeratorRevoke,
+  serveOrganizerEventModerators,
   serveOrganizerInvitationAccept,
   serveOrganizerInvitationDecline,
   serveOrganizerInvitationRevoke,
@@ -248,6 +253,16 @@ function createWhiteboardHttpHandler() {
       "hosted_organizer_event_entry_lock",
     ),
     route(
+      "/organizers/{organizerId}/events/{eventId}/moderators",
+      serveOrganizerEventModerators,
+      "hosted_organizer_event_moderators",
+    ),
+    route(
+      "/organizers/{organizerId}/events/{eventId}/moderators/{accountId}/revoke",
+      serveOrganizerEventModeratorRevoke,
+      "hosted_organizer_event_moderator_revoke",
+    ),
+    route(
       "/organizers/{organizerId}/events/{eventId}/cover",
       serveOrganizerEventCover,
       "hosted_organizer_event_cover",
@@ -304,6 +319,9 @@ function createWhiteboardHttpHandler() {
       serveOperatorRejectApplication,
       "hosted_operator_application_reject",
     ),
+    // The SVG baseline route must precede the page route: a greedy
+    // {boardName} segment would otherwise swallow the `.svg` suffix.
+    route("/b/{boardName}.svg", serveEventBoardSvg, "hosted_event_board_svg"),
     route("/b/{boardName}", serveEventBoardPage, "hosted_event_board_page"),
     route("/events/{publicId}", serveEventPage, "hosted_event_page"),
     route("/events/{publicId}/enter", serveEventEnter, "hosted_event_enter"),
@@ -364,6 +382,7 @@ function missingBoardNameRoutes(prefix, routeName, options) {
 /**
  * @param {ServerConfig} config
  * @param {{
+ *   runtime?: typeof createServerRuntime,
  *   installShutdownHandlers?: boolean,
  *   logStarted?: boolean,
  *   socketsModule?: SocketServerModule,
@@ -372,7 +391,7 @@ function missingBoardNameRoutes(prefix, routeName, options) {
  */
 async function createServerApp(config, options = {}) {
   return startWhiteboardServer(config, {
-    runtime: createServerRuntime,
+    runtime: options.runtime || createServerRuntime,
     http: createWhiteboardHttpHandler(),
     sockets: options.socketsModule || sockets,
     installShutdownHandlers: options.installShutdownHandlers,

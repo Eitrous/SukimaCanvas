@@ -126,20 +126,31 @@ Real-time access to an event's Board Session is owned by
 [hosted_event/admission/](./server/hosted_event/admission/): each event
 carries an unguessable board name (`event-<hex>`), and `/b/{boardName}` is the
 only hosted page that renders the real WBO board (delegating to the legacy
-board renderer with the role pinned on the context). The same admission
-module gates every Socket.IO handshake — legacy board names are refused, and
-role ("moderator" for Owner/Admin including the Preparation Window, "editor"
-for a member holding the account's single writable connection, "reader" for
-its extra tabs) is pinned on the socket and consumed by
+board renderer with the role pinned on the context); `/b/{boardName}.svg`
+serves the same board's SVG baseline behind the same admission gate so the
+client's reconnect baseline refresh cannot strand a disconnected tab. The same
+admission module gates every Socket.IO handshake — legacy board names are
+refused, and role ("moderator" for Organizer Owner/Admin including the
+Preparation Window, "event_moderator" for a per-event Event Moderator grant
+with the same entry window and seat exemption but never the Clear capability,
+"editor" for a member holding the account's single writable connection,
+"reader" for its extra tabs) is pinned on the socket and consumed by
 [board_capabilities.mjs](./server/auth/board_capabilities.mjs) instead of
-JWTs. Participant Seats count distinct Accounts per Event against the Board
+JWTs. Event Moderator grants are created and revoked by Owner/Admin from the
+organizer event console (`/organizers/{organizerId}/events/{eventId}/moderators`);
+revocation refreshes the revoked account's live connections through the
+moderation socket-effects registry ([moderation/socket_effects.mjs](./server/hosted_event/moderation/socket_effects.mjs))
+— still-admissible sockets get their new role immediately, refused ones are
+dropped. Participant Seats count distinct Accounts per Event against the Board
 Session's approved capacity, survive a 10-minute reconnect grace
 (`WBO_HOSTED_SEAT_GRACE_MS`) after an account's last connection drops, and
 promote a companion tab to writer on writer loss; persistent writes are
 revalidated live (lifecycle, ban, writer slot) per message through
 `revalidateSocketWrite`. Hosted mode also blocks the Download tool through
 `BLOCKED_TOOLS`, and the board shell embeds its board identity
-(`board-identity` JSON) so the client boots correctly on non-`/boards/` URLs.
+(`board-identity` JSON, including the event page path on hosted boards) so the
+client boots correctly on non-`/boards/` URLs and can route terminal admission
+refusals back to the event page instead of looping reconnects.
 
 Hosted mode fail-closes at boot when `AUTH_SECRET_KEY` is empty: participant
 identifier derivation needs a stable deployment secret. Every accepted
@@ -152,6 +163,25 @@ SVG, round-tripped centrally through [stored_svg_item_codec.mjs](./server/persis
 Copies attribute to the copier while keeping their source relation; updates
 never change `createdBy`. Message normalization drops client-supplied
 attribution fields, so the browser can never forge an author.
+
+Event-scoped governance lives under
+[hosted_event/moderation/](./server/hosted_event/moderation/): a durable,
+append-only moderation log (`moderation_log.json`) records every report, warn,
+kick, Event Ban, unban, Entry Lock change, and Clear with the actual operator
+account, the target's event-scoped Participant Identifier and frozen display
+name, and a required reason (Clear collects one in hosted mode through the
+Clear tool; the wire schema allows an optional `reason` on CLEAR). The socket
+handlers in [hosted_moderation.mjs](./server/socket/hosted_moderation.mjs)
+own the real-time surface: hosted `report_user` messages never disconnect
+anyone — they are recorded and surfaced to governance roles via
+`user_reported` — while `moderation_action` (warn/kick/ban/unban, moderator
+only, reason required) applies dispositions, bans revoke the membership and
+evict every connection of the target through the socket-effects registry, and
+`moderation_state` serves moderators the event's ban list as Participant
+Identifiers with frozen names. Governance roles are protected targets:
+reports and dispositions against them are refused deterministically. Reports
+never carry emails or Account ids into the board; the Owner/Admin console
+renders the trail on the organizer event page with operator emails resolved.
 
 Every HTTP request passes through [dispatch.mjs](./server/http/dispatch.mjs),
 where URL validation, route matching, route-level access checks, request
@@ -388,20 +418,38 @@ includes `accessRefreshAfterMs`, the server-derived delay until the last active
 secret/IP ban expires. The browser schedules one reconnect at that boundary so
 `canEdit` and `canReport` refresh without polling. The server also ignores a
 non-moderator report targeting the reporter's own socket or another socket with
-the same non-empty, secret-derived user identity.
+the same non-empty, secret-derived user identity. On hosted event boards the
+`report_user` flow is event governance: self-reports, malformed socket ids, and
+targets on other events are rejected deterministically, reports are recorded in
+the moderation log and surfaced to governance roles via `user_reported`, and no
+one is disconnected by a report alone.
+
+Hosted Event moderators apply dispositions on the `moderation_action` event:
+`{ "action": "warn" | "kick" | "ban" | "unban", "reason": "<required>", "socketId"?: "<online target>", "participantId"?: "<banned participant identifier>" }`.
+Warn delivers `moderation_notice { "reason" }` to the target while it stays
+connected; kick and ban evict every connection of the target account on the
+event; ban revokes the membership and creates the durable Event Ban that
+overrides Access Codes, memberships, and future Entry Grants; unban matches by
+Participant Identifier against the event's current bans. A missing reason,
+unknown action, protected governance target, or unresolvable identifier is
+rejected deterministically (the optional ack reports `{ ok: false, reason }`).
+Moderators fetch the ban list for the unban flow via a `moderation_state` ack
+carrying `{ "banned": [{ "participantId", "name" }] }`.
 
 Board state and presence expose `canBan` separately from `canClear`. Moderation
 UI and moderator markers use `canBan`; Clear-tool access, large-batch admission,
-and destructive rate-limit bypasses use `canClear`.
+and destructive rate-limit bypasses use `canClear`. Hosted Event Moderators hold
+`canBan` but never `canClear`.
 
 Before the reported socket is closed, the server emits
-`moderation_disconnect { "banDurationMs": <duration>, "source": "moderator" | "peer_report", "moderationRule"?: "<rule>" }`.
+`moderation_disconnect { "banDurationMs": <duration>, "source": "moderator" | "peer_report" | "event_ban", "moderationRule"?: "<rule>" }`.
 Moderator actions use `source: "moderator"`; `0` means a warning and a positive
 duration means a ban. Non-moderator reports disconnect the reporter and
 reported user after logging the report, emit a zero-duration notice with
-`source: "peer_report"` only to the reported target, and do not ban. The client
-treats a missing, unknown, or incoherent source as moderator-originated for
-backward-compatible, fail-safe wording. For accepted non-moderator reports, the
+`source: "peer_report"` only to the reported target, and do not ban. Hosted
+event bans use `source: "event_ban"`. The client treats a missing, unknown, or
+incoherent source as moderator-originated for backward-compatible, fail-safe
+wording. For accepted non-moderator reports, the
 server emits `user_reported` only to connected moderators on that board. The
 `user_reported` payload is
 `{ "reporterName": "<display name>", "reportedName": "<display name>" }`.

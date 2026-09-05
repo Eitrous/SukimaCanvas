@@ -7,6 +7,9 @@ const http = require("node:http");
 
 const { createConfig } = require("../test_helpers.js");
 const { createServerApp } = require("../../server/server.mjs");
+const {
+  createServerRuntime,
+} = require("../../server/runtime/create_runtime.mjs");
 
 const CLIENT_WEBROOT = path.join(__dirname, "..", "..", "client-data");
 const STRONG_PASSWORD = "correct horse battery staple";
@@ -14,12 +17,16 @@ const MAX_FORM_BODY_BYTES = 32 * 1024;
 
 /**
  * @param {{[key: string]: any}} [overrides]
- * @returns {Promise<{app: import("http").Server, root: string, outboxDir: string}>}
+ * @returns {Promise<{app: import("http").Server, root: string, outboxDir: string, hostedEventModule: any}>}
  */
 async function createHostedServer(overrides = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "wbo-hosted-accounts-"));
   const historyDir = path.join(root, "history");
   await fs.mkdir(historyDir);
+  // Capture the composed hosted module so tests can drive the same durable
+  // stores the running server consults (ban flows, membership checks).
+  /** @type {{hostedEventModule?: any}} */
+  const capturedRuntime = {};
   const app = await createServerApp(
     createConfig({
       HOST: "127.0.0.1",
@@ -37,6 +44,11 @@ async function createHostedServer(overrides = {}) {
       ...overrides,
     }),
     {
+      runtime: (/** @type {any} */ runtimeConfig) => {
+        const runtime = createServerRuntime(runtimeConfig);
+        capturedRuntime.hostedEventModule = runtime.hostedEventModule;
+        return runtime;
+      },
       logStarted: false,
       socketsModule: {
         async start() {},
@@ -48,6 +60,7 @@ async function createHostedServer(overrides = {}) {
     app,
     root,
     outboxDir: path.join(root, "hosted-data", "mail-outbox"),
+    hostedEventModule: capturedRuntime.hostedEventModule,
   };
 }
 

@@ -11,6 +11,11 @@ import {
   resetBoardRegistry,
   setLoadedBoard,
 } from "../board/registry.mjs";
+import { isGovernanceRole } from "../hosted_event/admission/index.mjs";
+import {
+  moderationSocketEffects,
+  registerModerationSocketEffects,
+} from "../hosted_event/moderation/socket_effects.mjs";
 import observability from "../observability/index.mjs";
 import { resetBans } from "./bans.mjs";
 import {
@@ -18,6 +23,11 @@ import {
   handleBroadcastWriteMessage,
   shouldTraceBroadcast,
 } from "./broadcasts.mjs";
+import {
+  handleHostedModerationActionMessage,
+  handleHostedReportUserMessage,
+  handleModerationStateMessage,
+} from "./hosted_moderation.mjs";
 import {
   boardStateForSocket,
   clientIpFallback,
@@ -56,6 +66,7 @@ import {
 import {
   getLastUserReportLog as getLastSocketUserReportLog,
   handleReportUserMessage,
+  notifyModerationDisconnectThenClose,
   resetSocketReports,
 } from "./reports.mjs";
 import { getSocketUserSecret } from "./request.mjs";
@@ -432,7 +443,7 @@ function registerHostedSocketConnection(socket) {
   admission.socketId = socket.id;
   // The writer slot may have been claimed between admission preview and
   // connection; the registry's answer is authoritative.
-  if (admission.role !== "moderator") {
+  if (!isGovernanceRole(admission.role)) {
     socket.hostedBoardRole = connected.writable ? "editor" : "reader";
     socket.boardPermissionContext = undefined;
   }
@@ -480,10 +491,104 @@ async function releaseHostedSocket(socket, config) {
   const released = hosted.releaseEventSocket(socket.id);
   if (!released.promotedSocketId) return;
   const promoted = activeSockets.get(released.promotedSocketId);
-  if (!promoted || promoted.hostedEventAdmission?.role === "moderator") return;
+  if (!promoted || isGovernanceRole(promoted.hostedEventAdmission?.role)) {
+    return;
+  }
   promoted.hostedBoardRole = "editor";
   promoted.boardPermissionContext = undefined;
   await refreshSocketAccess(promoted, config);
+}
+
+/**
+ * Re-runs the hosted admission decision for one live socket. Used when the
+ * account's event-scoped authorizations changed under it (for example a
+ * revoked Event Moderator grant): sockets still admissible keep their
+ * connection with refreshed capabilities, refused ones are dropped so the
+ * next connect decides honestly.
+ *
+ * @param {AppSocket} targetSocket
+ * @param {ServerConfig} config
+ * @returns {Promise<void>}
+ */
+async function refreshHostedSocketAdmission(targetSocket, config) {
+  const hosted = targetSocket.hostedEventModule;
+  const admission = targetSocket.hostedEventAdmission;
+  if (hosted?.enabled !== true || !admission) return;
+  const verdict = hosted.admitEventBoardSocket({
+    boardName: admission.boardName,
+    cookieHeader: targetSocket.handshake.headers?.cookie,
+  });
+  if (verdict.ok === false) {
+    logger.info("socket.hosted_access_revoked", {
+      socket: targetSocket.id,
+      board: admission.boardName,
+      reason: verdict.reason,
+    });
+    closeSocket(targetSocket, "connection", { reason: verdict.reason });
+    return;
+  }
+  const previousRole = admission.role;
+  targetSocket.hostedEventAdmission = verdict;
+  targetSocket.hostedBoardRole = verdict.role;
+  targetSocket.boardPermissionContext = undefined;
+  if (previousRole !== verdict.role && !isGovernanceRole(verdict.role)) {
+    // A governance connection demoted to a member seat must now join the
+    // seat registry it previously bypassed.
+    const connected = hosted.noteEventSocketConnected(verdict, targetSocket.id);
+    if (!connected.admitted) {
+      closeSocket(targetSocket, "connection", { reason: "event_full" });
+      return;
+    }
+    targetSocket.hostedBoardRole = connected.writable ? "editor" : "reader";
+  }
+  await refreshSocketAccess(targetSocket, config);
+}
+
+/**
+ * Registers the socket layer's moderation effects: the real-time
+ * consequences of hosted governance decisions. Registered once per IO start
+ * so hosted routes can evict banned accounts and refresh revoked moderators
+ * without owning the socket table.
+ *
+ * @param {ServerConfig} config
+ * @returns {void}
+ */
+function registerModerationEffects(config) {
+  registerModerationSocketEffects({
+    evictEventAccount(eventId, accountId, notice) {
+      for (const target of [...activeSockets.values()]) {
+        const admission = target.hostedEventAdmission;
+        if (
+          !admission ||
+          admission.eventId !== eventId ||
+          admission.accountId !== accountId
+        ) {
+          continue;
+        }
+        notifyModerationDisconnectThenClose(
+          admission.boardName,
+          target,
+          closeSocket,
+          /** @type {{banDurationMs: number, source: "moderator" | "peer_report" | "event_ban"}} */ (
+            notice
+          ),
+        );
+      }
+    },
+    async refreshEventAccountAccess(eventId, accountId) {
+      for (const target of [...activeSockets.values()]) {
+        const admission = target.hostedEventAdmission;
+        if (
+          !admission ||
+          admission.eventId !== eventId ||
+          admission.accountId !== accountId
+        ) {
+          continue;
+        }
+        await refreshHostedSocketAdmission(target, config);
+      }
+    },
+  });
 }
 
 /**
@@ -494,6 +599,9 @@ async function releaseHostedSocket(socket, config) {
  */
 async function startIO(app, config, runtime) {
   io = new Server(app, { path: "/socket.io" });
+  // Real-time moderation effects (evictions, access refreshes) are applied
+  // through this registry by the hosted governance routes and handlers.
+  registerModerationEffects(config);
   io.use(
     (
       /** @type {AppSocket} */ socket,
@@ -826,6 +934,23 @@ async function handleSocketConnection(socket, config) {
           }),
         },
         function traceReportUser() {
+          // Hosted events route reports through the event governance flow:
+          // they are recorded and surfaced to the event's moderators, never
+          // a disconnect trigger. Legacy boards keep the peer-report flow.
+          const hosted = socket.hostedEventModule;
+          if (socket.hostedEventAdmission && hosted?.enabled === true) {
+            return handleHostedReportUserMessage({
+              socket,
+              boardName: normalizedName,
+              message,
+              config,
+              now: Date.now(),
+              getActiveSocket,
+              closeSocket,
+              hosted,
+              effects: moderationSocketEffects(),
+            });
+          }
           handleReportUserMessage({
             socket,
             boardName: normalizedName,
@@ -834,6 +959,69 @@ async function handleSocketConnection(socket, config) {
             now: Date.now(),
             getActiveSocket,
             closeSocket,
+          });
+          return undefined;
+        },
+      );
+    },
+  );
+
+  onSocketEvent(
+    socket,
+    SocketEvents.MODERATION_ACTION,
+    function onModerationAction(
+      /** @type {unknown} */ message,
+      /** @type {((result: unknown) => void) | undefined} */ ack,
+    ) {
+      const normalizedName = boardName;
+      return tracing.withActiveSpan(
+        "socket.moderation_action",
+        {
+          kind: tracing.SpanKind.INTERNAL,
+          attributes: socketTraceAttributes("moderation_action", {
+            "wbo.board": normalizedName,
+          }),
+        },
+        function traceModerationAction() {
+          return handleHostedModerationActionMessage({
+            socket,
+            boardName: normalizedName,
+            message,
+            config,
+            now: Date.now(),
+            getActiveSocket,
+            closeSocket,
+            hosted: socket.hostedEventModule,
+            effects: moderationSocketEffects(),
+            ack,
+          });
+        },
+      );
+    },
+  );
+
+  onSocketEvent(
+    socket,
+    SocketEvents.MODERATION_STATE,
+    function onModerationState(
+      /** @type {((result: unknown) => void) | undefined} */ ack,
+    ) {
+      const normalizedName = boardName;
+      return tracing.withActiveSpan(
+        "socket.moderation_state",
+        {
+          kind: tracing.SpanKind.INTERNAL,
+          attributes: socketTraceAttributes("moderation_state", {
+            "wbo.board": normalizedName,
+          }),
+        },
+        function traceModerationState() {
+          return handleModerationStateMessage({
+            socket,
+            boardName: normalizedName,
+            config,
+            hosted: socket.hostedEventModule,
+            ack,
           });
         },
       );
@@ -1054,6 +1242,16 @@ export const __test = {
     /** @type {AppSocket} */ socket,
   ) {
     return admitHostedSocket(socket);
+  },
+  /**
+   * Test seam: registers the production moderation socket effects against a
+   * scenario config so eviction and access-refresh tests exercise the real
+   * implementation through handleSocketConnection sockets.
+   */
+  registerModerationEffects: function registerModerationEffectsForTest(
+    /** @type {ServerConfig} */ config,
+  ) {
+    registerModerationEffects(config);
   },
   buildBoardUserRecord: function buildBoardUserRecordForTest(
     /** @type {AppSocket} */ socket,

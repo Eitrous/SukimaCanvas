@@ -317,9 +317,11 @@ test("deletes and clears keep the change audit after the items leave the stored 
         undefined,
         "socket-owner",
       );
+      // Hosted clears record a reason with the operator.
       await scenario.invoke(owner.socket, "broadcast", {
         tool: 11,
         type: MutationType.CLEAR,
+        reason: "audit clear",
       });
       const board = await scenario.getLoadedBoard(event.boardName);
       assert.equal(board.get("rect-1"), undefined);

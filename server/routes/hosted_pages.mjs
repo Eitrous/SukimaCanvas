@@ -7,7 +7,7 @@ import { serveError } from "../http/observation.mjs";
  * concept, so each route rejects with a deterministic 404 instead of falling
  * through to static file resolution.
  *
- * @param {keyof Pick<HostedEventModule, "serveRegister" | "serveLogin" | "serveVerify" | "serveLogout" | "serveForgot" | "serveReset" | "serveAccount" | "serveAccountPassword" | "serveAccountSessionRevoke" | "serveAccountSessionsRevokeOthers" | "serveOrganizerApply" | "serveOperatorConsole" | "serveOperatorApplication" | "serveOperatorApproveApplication" | "serveOperatorRejectApplication" | "serveOrganizerConsole" | "serveOrganizerInvitationAccept" | "serveOrganizerInvitationDecline" | "serveOrganizerManage" | "serveOrganizerInvite" | "serveOrganizerInvitationRevoke" | "serveOrganizerMemberRole" | "serveOrganizerMemberRemove" | "serveOrganizerReservations" | "serveOrganizerReservation" | "serveSubmitReservation" | "serveCancelReservation" | "serveSubmitChangeRequest" | "serveOperatorReservations" | "serveOperatorReservation" | "serveOperatorApproveReservation" | "serveOperatorRejectReservation" | "serveOperatorChanges" | "serveOperatorChange" | "serveOperatorApproveChange" | "serveOperatorRejectChange" | "serveEventPage" | "serveEventEnter" | "serveEventAnonymity" | "serveBrandAsset" | "serveOrganizerEvent" | "serveOrganizerEventAccessCode" | "serveOrganizerEventEntryLock" | "serveOrganizerEventCover">} handlerName
+ * @param {keyof Pick<HostedEventModule, "serveRegister" | "serveLogin" | "serveVerify" | "serveLogout" | "serveForgot" | "serveReset" | "serveAccount" | "serveAccountPassword" | "serveAccountSessionRevoke" | "serveAccountSessionsRevokeOthers" | "serveOrganizerApply" | "serveOperatorConsole" | "serveOperatorApplication" | "serveOperatorApproveApplication" | "serveOperatorRejectApplication" | "serveOrganizerConsole" | "serveOrganizerInvitationAccept" | "serveOrganizerInvitationDecline" | "serveOrganizerManage" | "serveOrganizerInvite" | "serveOrganizerInvitationRevoke" | "serveOrganizerMemberRole" | "serveOrganizerMemberRemove" | "serveOrganizerReservations" | "serveOrganizerReservation" | "serveSubmitReservation" | "serveCancelReservation" | "serveSubmitChangeRequest" | "serveOperatorReservations" | "serveOperatorReservation" | "serveOperatorApproveReservation" | "serveOperatorRejectReservation" | "serveOperatorChanges" | "serveOperatorChange" | "serveOperatorApproveChange" | "serveOperatorRejectChange" | "serveEventPage" | "serveEventEnter" | "serveEventAnonymity" | "serveBrandAsset" | "serveOrganizerEvent" | "serveOrganizerEventAccessCode" | "serveOrganizerEventEntryLock" | "serveOrganizerEventModerators" | "serveOrganizerEventModeratorRevoke" | "serveOrganizerEventCover">} handlerName
  * @returns {import("../../types/server-runtime.d.ts").HttpRouteHandler}
  */
 function serveHostedAccountPage(handlerName) {
@@ -134,6 +134,12 @@ export const serveOrganizerEventAccessCode = serveHostedAccountPage(
 );
 export const serveOrganizerEventEntryLock = serveHostedAccountPage(
   "serveOrganizerEventEntryLock",
+);
+export const serveOrganizerEventModerators = serveHostedAccountPage(
+  "serveOrganizerEventModerators",
+);
+export const serveOrganizerEventModeratorRevoke = serveHostedAccountPage(
+  "serveOrganizerEventModeratorRevoke",
 );
 export const serveOrganizerEventCover = serveHostedAccountPage(
   "serveOrganizerEventCover",

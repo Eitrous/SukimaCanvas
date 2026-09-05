@@ -225,6 +225,20 @@ function eventLifecycleState(event, now) {
  *   organizerId: string | null,
  * }} StoredAuditRecord
  */
+/**
+ * A per-event realtime governance grant. An Event Moderator may enter the
+ * event's Board Session during the Preparation Window and while it is open
+ * and act on reports there, but holds no organizer membership, console
+ * access, or authority over any other event.
+ *
+ * @typedef {{
+ *   eventId: string,
+ *   organizerId: string,
+ *   accountId: string,
+ *   grantedAtMs: number,
+ *   grantedByAccountId: string,
+ * }} StoredEventModerator
+ */
 
 /**
  * Computes the peak concurrent Board Session count and Participant Seat total
@@ -316,6 +330,8 @@ function createFileOrganizerStore(options) {
   const boardSessionsById = new Map();
   /** @type {Map<string, StoredChangeRequest>} */
   const changeRequestsById = new Map();
+  /** @type {Map<string, StoredEventModerator>} */
+  const eventModeratorsByKey = new Map();
   /** @type {StoredAuditRecord[]} */
   const auditRecords = [];
   let loaded = false;
@@ -332,6 +348,7 @@ function createFileOrganizerStore(options) {
     dataDir,
     "reservation_change_requests.json",
   );
+  const EVENT_MODERATORS_FILE = path.join(dataDir, "event_moderators.json");
   const AUDIT_FILE = path.join(dataDir, "change_audit.json");
 
   /**
@@ -341,6 +358,15 @@ function createFileOrganizerStore(options) {
    */
   function roleKey(organizerId, accountId) {
     return `${organizerId}:${accountId}`;
+  }
+
+  /**
+   * @param {string} eventId
+   * @param {string} accountId
+   * @returns {string}
+   */
+  function eventModeratorKey(eventId, accountId) {
+    return `${eventId}:${accountId}`;
   }
 
   /**
@@ -453,6 +479,17 @@ function createFileOrganizerStore(options) {
     )) {
       auditRecords.push(record);
     }
+    const eventModerators = readStoreFile(EVENT_MODERATORS_FILE, {
+      moderators: [],
+    });
+    for (const moderator of /** @type {StoredEventModerator[]} */ (
+      eventModerators.moderators || []
+    )) {
+      eventModeratorsByKey.set(
+        eventModeratorKey(moderator.eventId, moderator.accountId),
+        moderator,
+      );
+    }
   }
 
   /**
@@ -542,6 +579,10 @@ function createFileOrganizerStore(options) {
     await writeStoreFile(CHANGE_REQUESTS_FILE, {
       version: STORE_FORMAT_VERSION,
       changeRequests: [...changeRequestsById.values()],
+    });
+    await writeStoreFile(EVENT_MODERATORS_FILE, {
+      version: STORE_FORMAT_VERSION,
+      moderators: [...eventModeratorsByKey.values()],
     });
     await writeStoreFile(AUDIT_FILE, {
       version: STORE_FORMAT_VERSION,
@@ -2293,6 +2334,110 @@ function createFileOrganizerStore(options) {
     return { ok: true };
   }
 
+  // --- event moderation grants ---------------------------------------------
+
+  /**
+   * Whether the account holds the Event Moderator grant for the event. The
+   * check is deliberately narrow: it never implies organizer membership,
+   * console access, or any authority beyond this one event's real-time
+   * governance.
+   *
+   * @param {string} eventId
+   * @param {string} accountId
+   * @returns {boolean}
+   */
+  function isEventModerator(eventId, accountId) {
+    ensureLoaded();
+    if (typeof eventId !== "string" || typeof accountId !== "string") {
+      return false;
+    }
+    if (eventId === "" || accountId === "") return false;
+    return eventModeratorsByKey.has(eventModeratorKey(eventId, accountId));
+  }
+
+  /**
+   * Event moderators of an event, oldest grant first.
+   *
+   * @param {string} eventId
+   * @returns {StoredEventModerator[]}
+   */
+  function listEventModerators(eventId) {
+    ensureLoaded();
+    return [...eventModeratorsByKey.values()]
+      .filter((moderator) => moderator.eventId === eventId)
+      .sort((left, right) => left.grantedAtMs - right.grantedAtMs);
+  }
+
+  /**
+   * Grants the Event Moderator role for one event to an account. Idempotent:
+   * granting an existing moderator keeps the original grant. The store only
+   * verifies the event belongs to the organizer; the route layer resolves the
+   * target account and restricts the action to Owner/Admin.
+   *
+   * @param {{organizerId: string, eventId: string, targetAccountId: string, actorAccountId: string}} input
+   * @returns {Promise<{ok: true, created: boolean} | {ok: false, reason: "not_found"}>}
+   */
+  async function grantEventModerator(input) {
+    ensureLoaded();
+    const event = getEventForOrganizer(input.organizerId, input.eventId);
+    if (!event) return { ok: false, reason: "not_found" };
+    const accountId = String(input.targetAccountId || "");
+    if (accountId === "")
+      throw new Error("grantEventModerator requires targetAccountId");
+    const key = eventModeratorKey(event.eventId, accountId);
+    if (eventModeratorsByKey.has(key)) return { ok: true, created: false };
+    eventModeratorsByKey.set(key, {
+      eventId: event.eventId,
+      organizerId: event.organizerId,
+      accountId,
+      grantedAtMs: clock(),
+      grantedByAccountId: String(input.actorAccountId || ""),
+    });
+    recordAudit({
+      actorAccountId: String(input.actorAccountId || ""),
+      actorKind: "account",
+      action: "event_moderator.granted",
+      subjectType: "event_moderator",
+      subjectId: accountId,
+      organizerId: event.organizerId,
+    });
+    await enqueueWrite(persistNow);
+    return { ok: true, created: true };
+  }
+
+  /**
+   * Revokes the Event Moderator grant for one event. Revoking an account that
+   * is not a moderator fails without side effects. Existing live connections
+   * of the revoked account are refreshed by the route layer through the
+   * moderation socket effects, not here.
+   *
+   * @param {{organizerId: string, eventId: string, targetAccountId: string, actorAccountId: string}} input
+   * @returns {Promise<{ok: true} | {ok: false, reason: "not_found" | "not_moderator"}>}
+   */
+  async function revokeEventModerator(input) {
+    ensureLoaded();
+    const event = getEventForOrganizer(input.organizerId, input.eventId);
+    if (!event) return { ok: false, reason: "not_found" };
+    const key = eventModeratorKey(
+      event.eventId,
+      String(input.targetAccountId || ""),
+    );
+    if (!eventModeratorsByKey.has(key)) {
+      return { ok: false, reason: "not_moderator" };
+    }
+    eventModeratorsByKey.delete(key);
+    recordAudit({
+      actorAccountId: String(input.actorAccountId || ""),
+      actorKind: "account",
+      action: "event_moderator.revoked",
+      subjectType: "event_moderator",
+      subjectId: String(input.targetAccountId || ""),
+      organizerId: event.organizerId,
+    });
+    await enqueueWrite(persistNow);
+    return { ok: true };
+  }
+
   /**
    * Resolves once every scheduled write has landed on disk.
    *
@@ -2358,6 +2503,10 @@ function createFileOrganizerStore(options) {
     setEventCover,
     rotateEventAccessCode,
     setEventEntryLock,
+    isEventModerator,
+    listEventModerators,
+    grantEventModerator,
+    revokeEventModerator,
     flush,
   };
 }

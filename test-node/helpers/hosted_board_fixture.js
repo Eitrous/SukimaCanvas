@@ -30,6 +30,12 @@ const {
 const {
   createFileEventMembershipStore,
 } = require("../../server/hosted_event/memberships/store.mjs");
+const {
+  createFileModerationStore,
+} = require("../../server/hosted_event/moderation/store.mjs");
+const {
+  createEventModeration,
+} = require("../../server/hosted_event/moderation/index.mjs");
 const { MutationType } = require("../../client-data/js/mutation_type.js");
 
 const MINUTE = 60 * 1000;
@@ -60,6 +66,13 @@ async function createFixture(now, { seats = 2 } = {}) {
   });
   const organizerStore = createFileOrganizerStore({ dataDir, clock });
   const membershipStore = createFileEventMembershipStore({ dataDir, clock });
+  const moderationStore = createFileModerationStore({ dataDir, clock });
+  const eventModeration = createEventModeration({
+    organizerStore,
+    membershipStore,
+    moderationStore,
+    participantIdentifierFor,
+  });
   const admission = createEventAdmission({
     seatGraceMs: 10 * MINUTE,
     accountStore,
@@ -71,7 +84,17 @@ async function createFixture(now, { seats = 2 } = {}) {
   registerBoardMutationLedgerFactory((boardName) =>
     createFileBoardMutationLedger({ boardName, dataDir }),
   );
-  const hostedModule = { enabled: true, ...admission };
+  const hostedModule = {
+    enabled: true,
+    ...admission,
+    ...eventModeration,
+    moderationStore,
+    // Mirrors the composed hosted module: admission advances the durable
+    // lifecycle against the fixture clock before every decision.
+    refreshEventLifecycle: async () => {
+      await organizerStore.advanceLifecycle({ now: holder.now });
+    },
+  };
 
   const owner = await provisionAccount(accountStore, "owner@example.com");
   const app = await organizerStore.submitApplication({
@@ -132,9 +155,13 @@ async function createFixture(now, { seats = 2 } = {}) {
     holder,
     dataDir,
     ledgerDir: path.join(dataDir, "mutation-ledger"),
+    accountStore,
     organizerStore,
+    membershipStore,
     admission,
     hostedModule,
+    eventModeration,
+    moderationStore,
     event,
     boardSession,
     owner: {

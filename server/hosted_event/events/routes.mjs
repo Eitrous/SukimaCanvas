@@ -12,6 +12,8 @@ import {
   translate,
 } from "../http_forms.mjs";
 import { accessCodeMatches } from "../memberships/access_codes.mjs";
+import { MAX_REASON_LENGTH } from "../moderation/store.mjs";
+import { moderationSocketEffects } from "../moderation/socket_effects.mjs";
 import {
   eventLifecycleState,
   MAX_EVENT_TAGLINE_LENGTH,
@@ -61,6 +63,7 @@ const EVENT_STATUS_KEYS = {
  *   accountStore: ReturnType<typeof import("../accounts/store.mjs").createFileAccountStore>,
  *   organizerStore: ReturnType<typeof import("../organizers/store.mjs").createFileOrganizerStore>,
  *   membershipStore: ReturnType<typeof import("../memberships/store.mjs").createFileEventMembershipStore>,
+ *   moderation: ReturnType<typeof import("../moderation/index.mjs").createEventModeration>,
  *   assetStore: ReturnType<typeof import("../assets/store.mjs").createFileBrandAssetStore>,
  *   limiter: ReturnType<typeof import("../accounts/rate_limits.mjs").createRateLimiter>,
  *   templates: {
@@ -77,6 +80,7 @@ function createEventRoutes(dependencies) {
     accountStore,
     organizerStore,
     membershipStore,
+    moderation,
     assetStore,
     limiter,
     templates,
@@ -222,6 +226,14 @@ function createEventRoutes(dependencies) {
           return role === "owner" || role === "admin";
         })()
       : false;
+    // Event Moderators enter through the same governance windows as
+    // Owner/Admin; the board link below is only a convenience — the board
+    // route enforces the same rules server-side.
+    const viewerIsGovernance =
+      viewerIsOwnerAdmin ||
+      (account
+        ? organizerStore.isEventModerator(event.eventId, account.accountId)
+        : false);
     template.serveWithStatus(ctx.request, ctx.response, statusCode, {
       hostedEventPublicId: event.publicId,
       hostedEventName: event.name,
@@ -254,23 +266,22 @@ function createEventRoutes(dependencies) {
       // New entry is offered only while the session is in its open window.
       hostedEventEnterForm:
         Boolean(account) && !membership && sessionOpen(session),
-      // The board link: members enter once the session is open; Owner/Admin
-      // also during the Preparation Window. The link is only a convenience —
-      // the board route enforces the same rules server-side.
+      // The board link: members enter once the session is open; governance
+      // roles also during the Preparation Window.
       hostedEventBoardHref:
         account &&
         (membership
           ? sessionOpen(session)
-          : viewerIsOwnerAdmin &&
+          : viewerIsGovernance &&
             session !== null &&
             (session.status === "scheduled" || session.status === "open"))
           ? `b/${event.boardName}`
           : undefined,
       hostedEventLoginPrompt: !account && !cancelled && lifecycle !== "ended",
-      // Owner/Admin board entry during the Preparation Window (they are not
+      // Governance board entry during the Preparation Window (they are not
       // members, so the membership block above does not apply to them).
       hostedEventOwnerBoardLink:
-        viewerIsOwnerAdmin &&
+        viewerIsGovernance &&
         !membership &&
         session !== null &&
         (session.status === "scheduled" || session.status === "open")
@@ -385,6 +396,10 @@ function createEventRoutes(dependencies) {
     }
     const admitted =
       eventEnterable(event) &&
+      // An Event Ban overrides the shared Access Code: banned accounts are
+      // refused here with the same uniform failure as every other admission
+      // failure, and the board admission gate refuses them independently.
+      !membershipStore.isEventBanned(event.eventId, account.accountId) &&
       accessCodeMatches(form.get("accessCode"), event.accessCodeDigest || "");
     if (!admitted) {
       logger.info("hosted.event_entry_rejected", {
@@ -540,7 +555,7 @@ function createEventRoutes(dependencies) {
       ctx.params.eventId || "",
     );
     if (!managed) return;
-    renderManageEvent(ctx, organizerId, managed.event, 200, {});
+    return renderManageEvent(ctx, organizerId, managed.event, 200, {});
   }
 
   /**
@@ -549,11 +564,37 @@ function createEventRoutes(dependencies) {
    * @param {import("../organizers/store.mjs").StoredEvent} event
    * @param {number} statusCode
    * @param {{errorKey?: string, noticeKey?: string, accessCodeReveal?: string}} state
-   * @returns {void}
+   * @returns {Promise<void>}
    */
-  function renderManageEvent(ctx, organizerId, event, statusCode, state) {
+  async function renderManageEvent(ctx, organizerId, event, statusCode, state) {
     const template = templates.organizerEvent;
     const lifecycle = eventLifecycleState(event, clock());
+    // The governance trail: per-event moderators, current bans projected to
+    // Participant Identifiers with frozen names, and the latest moderation
+    // records for this Owner/Admin view. Operator emails resolve here —
+    // this console never renders target emails or Account ids.
+    const moderators = organizerStore
+      .listEventModerators(event.eventId)
+      .map((grant) => ({
+        accountId: grant.accountId,
+        email: accountStore.getAccountById(grant.accountId)?.email || "",
+        grantedAt: formatTimestamp(grant.grantedAtMs),
+      }));
+    const moderationRecords = (
+      await moderation.listEventModeration(event.eventId, 20)
+    ).map((record) => ({
+      actionLabel: translate(
+        template,
+        ctx,
+        `hosted_moderation_action_${record.action}`,
+      ),
+      operatorEmail:
+        accountStore.getAccountById(record.operatorAccountId)?.email || "",
+      targetParticipantId: record.targetParticipantId || undefined,
+      targetName: record.targetName || undefined,
+      reason: record.reason || undefined,
+      createdAt: formatTimestamp(record.createdAtMs),
+    }));
     template.serveWithStatus(ctx.request, ctx.response, statusCode, {
       hostedOrganizerId: organizerId,
       hostedEventId: event.eventId,
@@ -589,6 +630,11 @@ function createEventRoutes(dependencies) {
       hostedEventManageNotice: state.noticeKey
         ? translate(template, ctx, state.noticeKey)
         : undefined,
+      // Governance management.
+      hostedEventModerators: moderators,
+      hostedEventHasModerators: moderators.length > 0,
+      hostedEventModerationRecords: moderationRecords,
+      hostedEventHasModerationRecords: moderationRecords.length > 0,
       csrfToken: ensureCsrfToken(ctx),
     });
   }
@@ -610,14 +656,14 @@ function createEventRoutes(dependencies) {
     if (!managed) return;
     const form = await readFormBody(ctx.request);
     if (!requestHasValidCsrf(ctx.request, form)) {
-      renderManageEvent(ctx, organizerId, managed.event, 403, {
+      await renderManageEvent(ctx, organizerId, managed.event, 403, {
         errorKey: "hosted_error_csrf",
       });
       return;
     }
     const tagline = (form.get("tagline") || "").trim();
     if (tagline.length > MAX_EVENT_TAGLINE_LENGTH) {
-      renderManageEvent(ctx, organizerId, managed.event, 400, {
+      await renderManageEvent(ctx, organizerId, managed.event, 400, {
         errorKey: "hosted_event_error_tagline",
       });
       return;
@@ -685,7 +731,7 @@ function createEventRoutes(dependencies) {
       ).allowed ||
       !limiter.consume("brand_asset", `ip:${address}`, limit, windowMs).allowed
     ) {
-      renderManageEvent(ctx, organizerId, managed.event, 429, {
+      await renderManageEvent(ctx, organizerId, managed.event, 429, {
         errorKey: "hosted_error_rate_limited",
       });
       return;
@@ -695,13 +741,13 @@ function createEventRoutes(dependencies) {
       _csrf: upload.fields._csrf || "",
     });
     if (!requestHasValidCsrf(ctx.request, csrfForm)) {
-      renderManageEvent(ctx, organizerId, managed.event, 403, {
+      await renderManageEvent(ctx, organizerId, managed.event, 403, {
         errorKey: "hosted_error_csrf",
       });
       return;
     }
     if (!upload.file || upload.file.bytes.length === 0) {
-      renderManageEvent(ctx, organizerId, managed.event, 400, {
+      await renderManageEvent(ctx, organizerId, managed.event, 400, {
         errorKey: "hosted_event_cover_error_invalid",
       });
       return;
@@ -712,7 +758,9 @@ function createEventRoutes(dependencies) {
         sniffed.reason === "too_large"
           ? "hosted_event_cover_error_too_large"
           : "hosted_event_cover_error_type";
-      renderManageEvent(ctx, organizerId, managed.event, 400, { errorKey });
+      await renderManageEvent(ctx, organizerId, managed.event, 400, {
+        errorKey,
+      });
       return;
     }
     const previousCoverId = managed.event.coverAssetId;
@@ -771,7 +819,7 @@ function createEventRoutes(dependencies) {
     if (!managed) return;
     const form = await readFormBody(ctx.request);
     if (!requestHasValidCsrf(ctx.request, form)) {
-      renderManageEvent(ctx, organizerId, managed.event, 403, {
+      await renderManageEvent(ctx, organizerId, managed.event, 403, {
         errorKey: "hosted_error_csrf",
       });
       return;
@@ -787,7 +835,7 @@ function createEventRoutes(dependencies) {
       event_id: managed.event.eventId,
       replaced: rotated.replaced,
     });
-    renderManageEvent(ctx, organizerId, managed.event, 200, {
+    await renderManageEvent(ctx, organizerId, managed.event, 200, {
       accessCodeReveal: rotated.accessCode,
     });
   }
@@ -812,7 +860,7 @@ function createEventRoutes(dependencies) {
     if (!managed) return;
     const form = await readFormBody(ctx.request);
     if (!requestHasValidCsrf(ctx.request, form)) {
-      renderManageEvent(ctx, organizerId, managed.event, 403, {
+      await renderManageEvent(ctx, organizerId, managed.event, 403, {
         errorKey: "hosted_error_csrf",
       });
       return;
@@ -825,10 +873,146 @@ function createEventRoutes(dependencies) {
       actorAccountId: managed.account.accountId,
     });
     if (!result.ok) throw new BoundaryError(404, "event_not_found");
+    // The governance trail carries the reason; the store audit carries the
+    // administrative record. Both record the actual operator.
+    await moderation.recordEntryLockChange({
+      eventId: managed.event.eventId,
+      locked,
+      operatorAccountId: managed.account.accountId,
+      reason: (form.get("reason") || "").trim().slice(0, MAX_REASON_LENGTH),
+    });
     logger.info("hosted.event_entry_lock_changed", {
       organizer_id: organizerId,
       event_id: managed.event.eventId,
       locked,
+    });
+    seeOther(
+      ctx,
+      publicPath(
+        config,
+        `/organizers/${organizerId}/events/${managed.event.eventId}`,
+      ),
+    );
+  }
+
+  // --- event moderator grants ----------------------------------------------
+
+  /**
+   * Grants the Event Moderator role for this event to the account behind an
+   * email. The target must be a registered, verified, active account; an
+   * Owner/Admin of the organizer is refused (they already hold stronger
+   * rights). Owner/Admin only.
+   *
+   * @param {HttpRouteContext} ctx
+   * @returns {Promise<void>}
+   */
+  async function serveOrganizerEventModerators(ctx) {
+    if (ctx.request.method !== "POST") {
+      throw new BoundaryError(405, "method_not_allowed");
+    }
+    const organizerId = ctx.params.organizerId || "";
+    const managed = requireManagedEvent(
+      ctx,
+      organizerId,
+      ctx.params.eventId || "",
+    );
+    if (!managed) return;
+    const form = await readFormBody(ctx.request);
+    if (!requestHasValidCsrf(ctx.request, form)) {
+      await renderManageEvent(ctx, organizerId, managed.event, 403, {
+        errorKey: "hosted_error_csrf",
+      });
+      return;
+    }
+    const email = (form.get("email") || "").trim().toLowerCase();
+    const account = email === "" ? null : accountStore.getAccountByEmail(email);
+    if (
+      !account ||
+      account.status !== "active" ||
+      account.verifiedAtMs === null
+    ) {
+      await renderManageEvent(ctx, organizerId, managed.event, 400, {
+        errorKey: "hosted_event_moderator_error_unknown",
+      });
+      return;
+    }
+    const organizerRole = organizerStore.getMemberRole(
+      organizerId,
+      account.accountId,
+    );
+    if (organizerRole === "owner" || organizerRole === "admin") {
+      await renderManageEvent(ctx, organizerId, managed.event, 400, {
+        errorKey: "hosted_event_moderator_error_organizer_member",
+      });
+      return;
+    }
+    const granted = await organizerStore.grantEventModerator({
+      organizerId,
+      eventId: managed.event.eventId,
+      targetAccountId: account.accountId,
+      actorAccountId: managed.account.accountId,
+    });
+    if (!granted.ok) throw new BoundaryError(404, "event_not_found");
+    logger.info("hosted.event_moderator_granted", {
+      organizer_id: organizerId,
+      event_id: managed.event.eventId,
+    });
+    await renderManageEvent(ctx, organizerId, managed.event, 200, {
+      noticeKey: granted.created
+        ? "hosted_event_moderator_granted"
+        : "hosted_event_moderator_already",
+    });
+  }
+
+  /**
+   * Revokes the Event Moderator grant for this event from one account and
+   * refreshes the account's live connections: still-admissible connections
+   * (an ordinary membership) get their new role immediately; refused ones are
+   * dropped. Owner/Admin only.
+   *
+   * @param {HttpRouteContext} ctx
+   * @returns {Promise<void>}
+   */
+  async function serveOrganizerEventModeratorRevoke(ctx) {
+    if (ctx.request.method !== "POST") {
+      throw new BoundaryError(405, "method_not_allowed");
+    }
+    const organizerId = ctx.params.organizerId || "";
+    const managed = requireManagedEvent(
+      ctx,
+      organizerId,
+      ctx.params.eventId || "",
+    );
+    if (!managed) return;
+    const form = await readFormBody(ctx.request);
+    if (!requestHasValidCsrf(ctx.request, form)) {
+      await renderManageEvent(ctx, organizerId, managed.event, 403, {
+        errorKey: "hosted_error_csrf",
+      });
+      return;
+    }
+    const revoked = await organizerStore.revokeEventModerator({
+      organizerId,
+      eventId: managed.event.eventId,
+      targetAccountId: ctx.params.accountId || "",
+      actorAccountId: managed.account.accountId,
+    });
+    if (revoked.ok === false) {
+      if (revoked.reason === "not_found") {
+        throw new BoundaryError(404, "event_not_found");
+      }
+      await renderManageEvent(ctx, organizerId, managed.event, 400, {
+        errorKey: "hosted_event_moderator_error_not_moderator",
+      });
+      return;
+    }
+    moderationSocketEffects()?.refreshEventAccountAccess(
+      managed.event.eventId,
+      ctx.params.accountId || "",
+    );
+    logger.info("hosted.event_moderator_revoked", {
+      organizer_id: organizerId,
+      event_id: managed.event.eventId,
     });
     seeOther(
       ctx,
@@ -848,6 +1032,8 @@ function createEventRoutes(dependencies) {
     serveOrganizerEvent,
     serveOrganizerEventAccessCode,
     serveOrganizerEventEntryLock,
+    serveOrganizerEventModerators,
+    serveOrganizerEventModeratorRevoke,
     serveOrganizerEventCover,
   };
 }

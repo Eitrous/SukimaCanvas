@@ -715,3 +715,62 @@ h1 {
   border: 1px solid var(--hosted-border);
   border-radius: 2px;
 }
+
+.hosted-moderator-list,
+.hosted-moderation-log {
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.hosted-moderator-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--hosted-border);
+  border-radius: 2px;
+}
+
+.hosted-moderator-email {
+  font-weight: 600;
+}
+
+.hosted-moderator-granted {
+  color: var(--hosted-muted);
+  font-size: 12px;
+}
+
+.hosted-moderator-item .hosted-reservation-action {
+  margin: 0 0 0 auto;
+}
+
+.hosted-moderation-record {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 0 0 4px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--hosted-border);
+  font-size: 13px;
+}
+
+.hosted-moderation-record:last-child {
+  border-bottom: none;
+}
+
+.hosted-moderation-record-time {
+  color: var(--hosted-muted);
+  font-size: 12px;
+}
+
+.hosted-moderation-record-action {
+  font-weight: 600;
+}
+
+.hosted-moderation-record-reason {
+  width: 100%;
+  color: var(--hosted-muted);
+}

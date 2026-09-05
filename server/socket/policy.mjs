@@ -1,8 +1,10 @@
 import { isValidBoardName } from "../../client-data/js/board_name.js";
 import {
   formatMessageTypeTag,
+  getMutationType,
   getToolId,
 } from "../../client-data/js/message_tool_metadata.js";
+import { MutationType } from "../../client-data/js/mutation_type.js";
 import RateLimitCommon from "../../client-data/js/rate_limit_common.js";
 import { TOOL_CODE_BY_ID } from "../../client-data/tools/manifest.js";
 import { BoardPermissions } from "../auth/board_capabilities.mjs";
@@ -521,6 +523,21 @@ function canApplyBoardMessage(config, board, data, socket) {
         socket: socket.id,
         board: board.name,
         reason: verdict.reason,
+      });
+      return false;
+    }
+    // Hosted events record who cleared and why; a Clear without a reason is
+    // rejected like any other blocked write. Legacy boards are unaffected.
+    if (
+      getMutationType(data) === MutationType.CLEAR &&
+      (() => {
+        const reason = /** @type {{reason?: unknown}} */ (data).reason;
+        return typeof reason !== "string" || reason.trim() === "";
+      })()
+    ) {
+      logger.warn("socket.hosted_clear_reason_required", {
+        socket: socket.id,
+        board: board.name,
       });
       return false;
     }

@@ -1078,6 +1078,7 @@ function createInputToolRuntime(tools) {
       messageForTool: () => unavailableCapability("messages.messageForTool"),
     },
     permissions: tools.access,
+    hostedEventPath: undefined,
   };
 }
 
@@ -1107,6 +1108,7 @@ function createHarnessToolRuntime(app) {
     ids: app.ids,
     messages: app.messages,
     permissions: app.access,
+    hostedEventPath: undefined,
   };
 }
 

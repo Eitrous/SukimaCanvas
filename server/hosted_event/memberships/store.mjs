@@ -283,6 +283,20 @@ function createFileEventMembershipStore(options) {
   }
 
   /**
+   * Current bans for one event, oldest first. The console and the board's
+   * unban flow list these; identity projection happens above this store.
+   *
+   * @param {string} eventId
+   * @returns {StoredEventBan[]}
+   */
+  function listEventBans(eventId) {
+    ensureLoaded();
+    return [...bansByKey.values()]
+      .filter((ban) => ban.eventId === eventId)
+      .sort((left, right) => left.createdAtMs - right.createdAtMs);
+  }
+
+  /**
    * Bans an account from an event, revoking any existing membership so the
    * banned participant loses board access immediately. Idempotent.
    *
@@ -348,6 +362,7 @@ function createFileEventMembershipStore(options) {
     admit,
     setAnonymity,
     isEventBanned,
+    listEventBans,
     banEvent,
     unbanEvent,
     flush,

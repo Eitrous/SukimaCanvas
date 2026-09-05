@@ -531,9 +531,17 @@ class BoardTemplate extends Template {
     // path (the Hosted Event board page), so the client boot prefers the
     // server-computed identity over deriving it from the location.
     params.socketIoPath = `${this.serverConfig?.BASE_PATH || ""}/socket.io`;
+    const hostedEventPath = /** @type {string | undefined} */ (
+      /** @type {Record<string, unknown>} */ (extraParams || {})[
+        "hostedEventPath"
+      ]
+    );
     params.boardIdentity = {
       board: params.board,
       socketIoPath: params.socketIoPath,
+      // Hosted Event boards embed the event page path so the client can
+      // route admission refusals back to the event page. Absent on legacy.
+      ...(hostedEventPath ? { hostedEventPath } : {}),
     };
     params.canonicalUrl = localizedUrl(boardBaseUrl, params.language);
     params.languageLinks = localizedLinks(params.languages, (linkLanguage) =>
